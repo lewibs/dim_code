@@ -616,7 +616,11 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 			'workbench.secondarySideBar.defaultVisibility': {
 				'type': 'string',
 				'enum': ['hidden', 'visibleInWorkspace', 'visible', 'maximizedInWorkspace', 'maximized'],
-				'default': 'visibleInWorkspace',
+				// Dim: the secondary side bar opens by default to the Claude Code terminal
+				// (see claudeTerminal.contribution.ts), which is the default aux-bar view. The old
+				// agent chat panel stays hidden (its view is gated off). Revert to 'hidden' to close
+				// the right panel on first launch instead.
+				'default': 'visible',
 				'description': localize('secondarySideBarDefaultVisibility', "Controls the default visibility of the secondary side bar in workspaces or empty windows that are opened for the first time. Can be overridden by the agent sessions startup editor setting."),
 				'enumDescriptions': [
 					localize('workbench.secondarySideBar.defaultVisibility.hidden', "The secondary side bar is hidden by default."),

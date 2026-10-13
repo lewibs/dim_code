@@ -61,26 +61,32 @@ const chatViewDescriptor: IViewDescriptor = {
 		id: ChatViewContainerId,
 		title: chatViewContainer.title,
 		mnemonicTitle: localize({ key: 'miToggleChat', comment: ['&& denotes a mnemonic'] }, "&&Chat"),
-		keybindings: {
-			primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyI,
-			mac: {
-				primary: KeyMod.CtrlCmd | KeyMod.WinCtrl | KeyCode.KeyI
-			}
-		},
+		// Dim: Ctrl+Alt+I now opens the Claude Code terminal (see claudeTerminal.contribution.ts),
+		// so the hidden chat view no longer claims this keybinding. Restore the block to revert.
+		// keybindings: {
+		// 	primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyI,
+		// 	mac: {
+		// 		primary: KeyMod.CtrlCmd | KeyMod.WinCtrl | KeyCode.KeyI
+		// 	}
+		// },
 		order: 1
 	},
 	ctorDescriptor: new SyncDescriptor(ChatViewPane),
-	when: ContextKeyExpr.and(
-		ChatContextKeys.accountPolicyGateActive.negate(),
-		ContextKeyExpr.or(
-			ContextKeyExpr.and(
-				ChatContextKeys.Setup.hidden.negate(),
-				ChatContextKeys.Setup.disabledInWorkspace.negate(),
-			),
-			ChatContextKeys.panelParticipantRegistered,
-			ChatContextKeys.extensionInvalid
-		)
-	)
+	// Dim: the agent chat panel is removed from the UI. The view stays registered so that the
+	// many ChatViewId references and commands keep compiling, but it never renders (when: false)
+	// and its container hides itself (hideIfEmpty). Restore the original `when` below to bring it back.
+	when: ContextKeyExpr.false()
+	// when: ContextKeyExpr.and(
+	// 	ChatContextKeys.accountPolicyGateActive.negate(),
+	// 	ContextKeyExpr.or(
+	// 		ContextKeyExpr.and(
+	// 			ChatContextKeys.Setup.hidden.negate(),
+	// 			ChatContextKeys.Setup.disabledInWorkspace.negate(),
+	// 		),
+	// 		ChatContextKeys.panelParticipantRegistered,
+	// 		ChatContextKeys.extensionInvalid
+	// 	)
+	// )
 };
 Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([chatViewDescriptor], chatViewContainer);
 

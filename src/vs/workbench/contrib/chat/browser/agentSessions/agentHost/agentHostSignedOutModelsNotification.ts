@@ -23,7 +23,6 @@ import { COPILOT_VENDOR_ID, ILanguageModelsService } from '../../../common/langu
 import { ILanguageModelsConfigurationService } from '../../../common/languageModelsConfiguration.js';
 
 const SIGNED_OUT_MODELS_NOTIFICATION_ID = 'agentHost.signedOutModels.copilot';
-const SIGN_IN_COMMAND_ID = 'workbench.action.chat.triggerSetup';
 const COPILOT_AGENT_HOST_PROVIDER_ID = 'copilotcli';
 const NOTIFICATION_CONTEXT_KEYS = new Set([
 	ChatEntitlementContextKeys.clientByokEnabled.key,
@@ -219,19 +218,14 @@ export class AgentHostSignedOutModelsNotificationContribution extends Disposable
 		return {
 			id: SIGNED_OUT_MODELS_NOTIFICATION_ID,
 			severity: ChatInputNotificationSeverity.Info,
-			message: localize('agentHost.signedOutModels.message', "Choose how you want to use Copilot."),
-			description: localize('agentHost.signedOutModels.description', "Sign in to use GitHub Copilot models, or add a model with your own API key."),
+			message: localize('agentHost.signedOutModels.message', "Add a model to get started."),
+			description: localize('agentHost.signedOutModels.description', "Add a model with your own API key."),
+			// Dim: the GitHub Copilot "Sign In" action is removed; only self-provided models remain.
 			actions: [
 				{
 					kind: ChatInputNotificationActionKind.Command,
 					label: localize('agentHost.signedOutModels.addModels', "Add Models"),
 					commandId: MANAGE_CHAT_COMMAND_ID,
-					keepOpen: true,
-				},
-				{
-					kind: ChatInputNotificationActionKind.Command,
-					label: localize('agentHost.signedOutModels.signIn', "Sign In"),
-					commandId: SIGN_IN_COMMAND_ID,
 					keepOpen: true,
 				}
 			],

@@ -13,8 +13,8 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ChatAIDisabledSettingId } from '../../../../../platform/chat/common/chatSettings.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
-import { hasSignedInCodexChatGPTAccount, ICodexAccountService, shouldShowCodexAccount } from '../../../../services/agentHost/browser/codexAccountService.js';
-import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, ShowTooltipCommand, StatusbarAlignment, StatusbarEntryKind } from '../../../../services/statusbar/browser/statusbar.js';
+import { ICodexAccountService } from '../../../../services/agentHost/browser/codexAccountService.js';
+import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, ShowTooltipCommand, StatusbarEntryKind } from '../../../../services/statusbar/browser/statusbar.js';
 import { CodexStatusDashboard, getCodexRateLimits } from './codexStatusDashboard.js';
 
 export const CODEX_STATUS_BAR_ENTRY_ID = 'codex.statusBarEntry';
@@ -65,22 +65,10 @@ export class CodexStatusBarEntry extends Disposable implements IWorkbenchContrib
 	}
 
 	private update(): void {
-		const account = this.codexAccountService.account;
-		const visible = hasSignedInCodexChatGPTAccount(account, shouldShowCodexAccount(this.configurationService, false));
-		if (!visible) {
-			this.entry.clear();
-			return;
-		}
-
-		const properties = this.getEntryProperties();
-		if (this.entry.value) {
-			this.entry.value.update(properties);
-		} else {
-			this.entry.value = this.statusbarService.addEntry(properties, CODEX_STATUS_BAR_ENTRY_ID, StatusbarAlignment.RIGHT, {
-				location: { id: 'chat.statusBarEntry', priority: 100.1 },
-				alignment: StatusbarAlignment.RIGHT,
-			});
-		}
+		// Dim: the Codex (OpenAI) status bar entry is removed from the UI. Clear any existing
+		// entry and never add one. getEntryProperties() below is kept intact so this can be
+		// restored by reinstating the original visibility logic.
+		this.entry.clear();
 	}
 
 	private getEntryProperties(): IStatusbarEntry {

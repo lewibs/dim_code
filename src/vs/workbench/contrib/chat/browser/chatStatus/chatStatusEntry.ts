@@ -7,7 +7,7 @@ import './media/chatStatus.css';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
-import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment, StatusbarEntryKind, ToggleTooltipCommand } from '../../../../services/statusbar/browser/statusbar.js';
+import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarEntryKind, ToggleTooltipCommand } from '../../../../services/statusbar/browser/statusbar.js';
 import { ChatEntitlement, ChatEntitlementContextKeys, ChatEntitlementService, getQuotaReset, IChatEntitlementService, isProUser } from '../../../../services/chat/common/chatEntitlementService.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { disposableLongTimeout, disposableTimeout } from '../../../../../base/common/async.js';
@@ -190,18 +190,11 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 	}
 
 	private update(): void {
-		const sentiment = this.chatEntitlementService.sentiment;
-		if (!sentiment.hidden) {
-			const props = this.getEntryProps();
-			if (this.entry) {
-				this.entry.update(props);
-			} else {
-				this.entry = this.statusbarService.addEntry(props, 'chat.statusBarEntry', StatusbarAlignment.RIGHT, { location: { id: 'status.editor.mode', priority: 100.1 }, alignment: StatusbarAlignment.RIGHT });
-			}
-		} else {
-			this.entry?.dispose();
-			this.entry = undefined;
-		}
+		// Dim: the Copilot status bar entry (its $(copilot) icon and "Sign In" affordance) is
+		// removed from the UI. Dispose any existing entry and never add a new one. The entry-prop
+		// builders below are kept intact so this can be restored by re-adding the original logic.
+		this.entry?.dispose();
+		this.entry = undefined;
 	}
 
 	private registerListeners(): void {

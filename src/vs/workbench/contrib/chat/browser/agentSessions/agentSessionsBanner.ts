@@ -85,7 +85,9 @@ export function createAgentsBanner(
 		}
 	}));
 	let accountResolved = false;
-	const shouldOfferSignIn = () => accountResolved && defaultAccountService?.currentDefaultAccount === null && configurationService.getValue<boolean>(ChatConfiguration.WelcomePageSignInEnabled) === true;
+	// Dim: never offer GitHub sign-in in the agent sessions banner. The leading `false` keeps the
+	// original condition (and its symbols) in place while guaranteeing the button shows its action label.
+	const shouldOfferSignIn = () => false && accountResolved && defaultAccountService?.currentDefaultAccount === null && configurationService.getValue<boolean>(ChatConfiguration.WelcomePageSignInEnabled) === true;
 	const updateButton = () => {
 		const offerSignIn = shouldOfferSignIn();
 		const buttonText = offerSignIn ? localize('agentsBanner.signIn', "Sign in to GitHub") : label;

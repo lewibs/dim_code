@@ -238,7 +238,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					id: CHAT_SETUP_ACTION_ID,
 					title: ChatSetupTriggerAction.CHAT_SETUP_ACTION_LABEL,
 					category: CHAT_CATEGORY,
-					f1: true,
+					f1: false, // Dim: hide the Copilot sign-in / AI setup command from the command palette (F1)
 					precondition: ContextKeyExpr.or(
 						ChatContextKeys.Setup.hidden,
 						ChatContextKeys.Setup.disabledInWorkspace,
@@ -381,8 +381,9 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					menu: {
 						id: MenuId.AccountsContext,
 						group: ACCOUNTS_SHARED_SIGN_IN_GROUP,
-						// Keep Copilot sign-in available after prior setup and alongside non-Copilot models.
-						when: ChatSetupFromAccountsWhen,
+						// Dim: remove the GitHub Copilot sign-in entry from the Accounts menu.
+						// The `false()` makes it never show; the original condition is kept (AND-ed) so symbols stay referenced.
+						when: ContextKeyExpr.and(ContextKeyExpr.false(), ChatSetupFromAccountsWhen),
 					}
 				});
 			}
@@ -410,6 +411,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 						id: MenuId.TitleBarAdjacentCenter,
 						order: 0,
 						when: ContextKeyExpr.and(
+							ContextKeyExpr.false(), // Dim: remove the title-bar "Sign In" button
 							IsWebContext.negate(),
 							ChatContextKeys.Entitlement.signedOut,
 							CONTEXT_DEFAULT_ACCOUNT_STATE.notEqualsTo(DefaultAccountStatus.Available), // hide only when signed in (a default GitHub account is present); still shown while signed out or before the account state resolves, incl. untrusted workspaces — no auth prompt

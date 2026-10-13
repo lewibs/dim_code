@@ -333,6 +333,9 @@ import './contrib/output/browser/outputView.js';
 // Terminal
 import './contrib/terminal/terminal.all.js';
 
+// Dim: Claude Code terminal (default secondary side bar content)
+import './contrib/claudeTerminal/browser/claudeTerminal.contribution.js';
+
 // External terminal
 import './contrib/externalTerminal/browser/externalTerminal.contribution.js';
 

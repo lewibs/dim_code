@@ -362,7 +362,8 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 				this._lastReported.set(setup.agent, toReport);
 				this._agentSdkSetupService.reportSetupState(setup.agent, toReport);
 			}
-			const notification = createAgentSdkSetupNotification(setup, displayName, state, hasModels, !signedIn);
+			// Dim: never surface the "Sign in to GitHub to use GitHub Copilot models" action/copy.
+			const notification = createAgentSdkSetupNotification(setup, displayName, state, hasModels, false /* includeGitHubSignIn */);
 			if (!notification) {
 				continue;
 			}
