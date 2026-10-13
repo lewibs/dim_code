@@ -22,7 +22,7 @@ export function agentHostPolicyReadiness(gaps: readonly IAgentHostPolicyReadines
 		entries.map(gap => [gap.policyName, gap.settingId, gap.source, getAgentHostPolicyGapImpact(gap.policyName)])
 	);
 	if (gaps.length === 0) {
-		content += localize('policyReadiness.noGaps', "No known unsupported requirements were found in the applied VS Code policies. This does not establish full runtime policy parity; user settings and unprojected runtime managed settings are outside this check.") + '\n\n';
+		content += localize('policyReadiness.noGaps', "No known unsupported requirements were found in the applied Dim policies. This does not establish full runtime policy parity; user settings and unprojected runtime managed settings are outside this check.") + '\n\n';
 	}
 	if (notEnforced.length > 0) {
 		content += `### ${localize('policyReadiness.notEnforced', "Applied requirements not enforced by Agent Host")} (${notEnforced.length})\n\n`;
@@ -30,7 +30,7 @@ export function agentHostPolicyReadiness(gaps: readonly IAgentHostPolicyReadines
 	}
 	if (needsVerification.length > 0) {
 		content += `### ${localize('policyReadiness.needsVerification', "Applied requirements needing verification")} (${needsVerification.length})\n\n`;
-		content += localize('policyReadiness.conditional', "These policies have incomplete coverage for some paths or delivery sources. This is not a finding that your current source or session fails to enforce them. Check the conditions below; a runtime-managed value may already be enforced even when its VS Code-only equivalent is not.") + '\n\n';
+		content += localize('policyReadiness.conditional', "These policies have incomplete coverage for some paths or delivery sources. This is not a finding that your current source or session fails to enforce them. Check the conditions below; a runtime-managed value may already be enforced even when its Dim-only equivalent is not.") + '\n\n';
 		content += gapTable(needsVerification);
 	}
 	content += `### ${localize('policyReadiness.rollout', "Rollout and harness selection")}\n\n`;

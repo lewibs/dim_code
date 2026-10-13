@@ -2162,7 +2162,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		}
 		if (error.errorType === 'CodexThreadInUse') {
 			return {
-				message: localize('agentHost.codexThreadInUse', "{0} Then send your message again in VS Code. Your message has not been sent.", codexWriterLockMessage()),
+				message: localize('agentHost.codexThreadInUse', "{0} Then send your message again in Dim. Your message has not been sent.", codexWriterLockMessage()),
 				isExpectedError: true,
 			};
 		}

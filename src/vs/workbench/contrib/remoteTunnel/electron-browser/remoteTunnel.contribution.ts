@@ -657,7 +657,7 @@ export class RemoteTunnelWorkbenchContribution extends Disposable implements IWo
 							notificationService.notify({
 								severity: Severity.Info,
 								message: NotificationText.format(
-									localize('progress.turnOn.final.noLinkLinked', "Remote Tunnel Access is enabled for {0}. You can {1} or {2} this access via the VS Code Accounts menu."),
+									localize('progress.turnOn.final.noLinkLinked', "Remote Tunnel Access is enabled for {0}. You can {1} or {2} this access via the Dim Accounts menu."),
 									connectionInfo.tunnelName, NotificationText.link(configureLabel, `command:${RemoteTunnelCommandIds.configure}`), turnOffLink
 								),
 							});
