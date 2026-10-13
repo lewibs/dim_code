@@ -316,7 +316,7 @@ suite('claudeSdkOptions / buildOptions plugins projection', () => {
 		});
 	});
 
-	test('PreToolUse projects a host runtime restriction', async () => {
+	test('PreToolUse projects a host runtime restriction after the built-in Dim hook', async () => {
 		const opts = await buildOptions({
 			...input(undefined),
 			onPreToolUse: (toolName, toolInput) => ({
@@ -324,7 +324,8 @@ suite('claudeSdkOptions / buildOptions plugins projection', () => {
 				stopReason: `${toolName}:${JSON.stringify(toolInput)}`,
 			}),
 		}, proxyTransport, () => { });
-		const hook = opts.hooks?.PreToolUse?.[0].hooks[0];
+		// Index 0 is the unconditional built-in Dim workflow hook; the host restriction follows it.
+		const hook = opts.hooks?.PreToolUse?.[1].hooks[0];
 		const result = await hook?.({
 			hook_event_name: 'PreToolUse',
 			tool_name: 'Bash',

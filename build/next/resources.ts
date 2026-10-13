@@ -47,6 +47,7 @@ const desktopResourcePatterns = [
 
 	// Shell scripts
 	'vs/base/node/*.sh',
+	'vs/platform/agentHost/node/claude/dimWorkflow/*.sh',
 	'vs/workbench/contrib/terminal/common/scripts/*.sh',
 	'vs/workbench/contrib/terminal/common/scripts/*.ps1',
 	'vs/workbench/contrib/terminal/common/scripts/*.psm1',
@@ -84,6 +85,9 @@ const serverResourcePatterns = [
 	// Shell scripts for process monitoring
 	'vs/base/node/cpuUsage.sh',
 	'vs/base/node/ps.sh',
+
+	// Dim built-in agent hook
+	'vs/platform/agentHost/node/claude/dimWorkflow/*.sh',
 
 	// External Terminal
 	'vs/workbench/contrib/externalTerminal/**/*.scpt',

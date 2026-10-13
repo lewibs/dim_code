@@ -24,6 +24,7 @@ import { McpServerType } from '../../../mcp/common/mcpPlatformTypes.js';
 import type { IMcpServerDefinition } from '../../../agentPlugins/common/pluginParsers.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { resolveMcpServerWorkingDirectory } from '../shared/mcpServerWorkingDirectory.js';
+import { dimDefaultHookGroup } from './dimWorkflow/dimWorkflow.js';
 
 type ClaudeSdkDeniedMcpServerSpec = NonNullable<Settings['deniedMcpServers']>[number];
 
@@ -150,14 +151,18 @@ export async function buildOptions(
 		PATH: `${dirname(resolvedRgDiskPath)}${delimiter}${process.env.PATH ?? ''}`,
 	};
 	const hooks: NonNullable<Options['hooks']> = {};
+	// Dim built-in agent hook: unconditionally runs the bundled workflow script
+	// on every tool-use event, in every build and every workspace.
+	const preToolUseHooks: NonNullable<Options['hooks']>['PreToolUse'] = [dimDefaultHookGroup(logStderr)];
 	if (input.onPreToolUse) {
-		hooks.PreToolUse = [{
+		preToolUseHooks.push({
 			hooks: [async hookInput => {
 				const preToolUse = hookInput as PreToolUseHookInput;
 				return input.onPreToolUse?.(preToolUse.tool_name, preToolUse.tool_input) ?? {};
 			}],
-		}];
+		});
 	}
+	hooks.PreToolUse = preToolUseHooks;
 	if (input.getUserPromptAdditionalContext) {
 		hooks.UserPromptSubmit = [{
 			hooks: [async () => ({
