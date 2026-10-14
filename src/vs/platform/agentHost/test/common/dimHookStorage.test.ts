@@ -7,7 +7,7 @@ import assert from 'assert';
 import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { dimHookRecordUri, dimHookStorageDir } from '../../common/dimHookStorage.js';
+import { dimHookRecordUri, dimHookStorageDir, isDimCodeFile } from '../../common/dimHookStorage.js';
 
 suite('dimHookStorage', () => {
 
@@ -28,6 +28,28 @@ suite('dimHookStorage', () => {
 			nestedFile: joinPath(dir, 'src/a/b.ts.dim').toString(),
 			outsideFolder: undefined,
 			folderItself: undefined,
+		});
+	});
+
+	test('isDimCodeFile matches source code but not docs, data, config or extensionless files', () => {
+		assert.deepStrictEqual({
+			ts: isDimCodeFile(URI.file('/p/src/a.ts')),
+			python: isDimCodeFile(URI.file('/p/main.py')),
+			upperCase: isDimCodeFile(URI.file('/p/Main.JAVA')),
+			markdown: isDimCodeFile(URI.file('/p/README.md')),
+			json: isDimCodeFile(URI.file('/p/package.json')),
+			text: isDimCodeFile(URI.file('/p/notes.txt')),
+			dotfile: isDimCodeFile(URI.file('/p/.gitignore')),
+			extensionless: isDimCodeFile(URI.file('/p/Makefile')),
+		}, {
+			ts: true,
+			python: true,
+			upperCase: true,
+			markdown: false,
+			json: false,
+			text: false,
+			dotfile: false,
+			extensionless: false,
 		});
 	});
 });

@@ -36,7 +36,7 @@ import { findGroup } from '../common/editorGroupFinder.js';
 import { ITextEditorService } from '../../textfile/common/textEditorService.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
-import { dimHookRecordUri } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { dimHookRecordUri, isDimCodeFile } from '../../../../platform/agentHost/common/dimHookStorage.js';
 
 export class EditorService extends Disposable implements EditorServiceImpl {
 
@@ -547,8 +547,9 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	 *
 	 * Returns `undefined` whenever there is no record to show: the open is not a
 	 * plain resource input (diff, merge or an already-typed input), the file is
-	 * not part of the open workspace, or it is itself a record under the storage
-	 * root (guarding against a redirect loop). Those opens still show themselves.
+	 * not a source-code file, it is not part of the open workspace, or it is
+	 * itself a record under the storage root (guarding against a redirect loop).
+	 * Those opens still show themselves.
 	 */
 	private async dimRecordFor(editor: EditorInput | IUntypedEditorInput): Promise<URI | undefined> {
 		if (!isResourceEditorInput(editor)) {
@@ -556,6 +557,10 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		}
 
 		const resource = editor.resource;
+		if (!isDimCodeFile(resource)) {
+			return undefined; // only source-code files get a record
+		}
+
 		const storageHome = this.environmentService.workspaceStorageHome;
 		if (this.uriIdentityService.extUri.isEqualOrParent(resource, storageHome)) {
 			return undefined; // already a record: never redirect onto ourselves

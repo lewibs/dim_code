@@ -4,8 +4,39 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { stringHash } from '../../../base/common/hash.js';
-import { joinPath, relativePath } from '../../../base/common/resources.js';
+import { extname, joinPath, relativePath } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
+
+/**
+ * File extensions (lower-case, without the leading dot) that Dim treats as
+ * source code and therefore gives a `.dim` change record. Everything else —
+ * documentation, data and config such as `.md`, `.json`, `.txt`, and
+ * extensionless files like `.gitignore` — is skipped.
+ *
+ * This list is mirrored by the `updateDimHook.sh` agent hook; keep the two in
+ * sync so the editor and the hook agree on which files get a record.
+ */
+const dimCodeExtensions = new Set<string>([
+	'ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs',
+	'py', 'pyw', 'pyi',
+	'java', 'kt', 'kts', 'scala', 'groovy',
+	'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'hh', 'hxx',
+	'cs', 'go', 'rs', 'rb', 'php', 'swift', 'm', 'mm',
+	'sh', 'bash', 'zsh', 'fish',
+	'pl', 'pm', 'lua', 'r', 'dart', 'ex', 'exs', 'erl', 'hs', 'fs', 'fsx', 'vb', 'clj', 'cljs',
+	'sql', 'vue', 'svelte', 'html', 'htm', 'css', 'scss', 'sass', 'less'
+]);
+
+/**
+ * Whether a file is a source-code file that Dim should give a `.dim` change
+ * record. Matching is by file extension against {@link dimCodeExtensions}.
+ *
+ * @param file The file to classify.
+ */
+export function isDimCodeFile(file: URI): boolean {
+	const ext = extname(file).replace(/^\./, '').toLowerCase();
+	return ext.length > 0 && dimCodeExtensions.has(ext);
+}
 
 /**
  * Resolves the directory where the Dim `updateDimHook` agent hook writes its

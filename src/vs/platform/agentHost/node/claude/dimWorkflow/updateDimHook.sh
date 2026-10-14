@@ -43,6 +43,20 @@ echo "$changed" | while IFS= read -r line; do
 		*.dim) continue ;;
 	esac
 
+	# Only record source-code files; skip docs, data, config and extensionless
+	# files. This list mirrors `dimCodeExtensions` in dimHookStorage.ts; keep the
+	# two in sync.
+	base=${path##*/}
+	case "$base" in
+		*.*) ext=$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]') ;;
+		*) ext="" ;;
+	esac
+	codeExtensions=" ts tsx mts cts js jsx mjs cjs py pyw pyi java kt kts scala groovy c h cc cpp cxx hpp hh hxx cs go rs rb php swift m mm sh bash zsh fish pl pm lua r dart ex exs erl hs fs fsx vb clj cljs sql vue svelte html htm css scss sass less "
+	case "$codeExtensions" in
+		*" $ext "*) ;;
+		*) continue ;;
+	esac
+
 	target="$DIM_DIM_DIR/$path.dim"
 	mkdir -p "$(dirname "$target")"
 
