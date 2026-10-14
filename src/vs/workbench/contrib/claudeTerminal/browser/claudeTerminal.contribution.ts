@@ -3,10 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
+import { FileAccess } from '../../../../base/common/network.js';
+import { joinPath } from '../../../../base/common/resources.js';
+import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
@@ -61,6 +68,9 @@ class ClaudeTerminalViewPane extends ViewPane {
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
 		@ITerminalService private readonly _terminalService: ITerminalService,
+		@IFileService private readonly _fileService: IFileService,
+		@IEnvironmentService private readonly _environmentService: IEnvironmentService,
+		@ILogService private readonly _logService: ILogService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 	}
@@ -104,10 +114,77 @@ class ClaudeTerminalViewPane extends ViewPane {
 			if (this._terminalContainer) {
 				this._attach(instance, this._terminalContainer);
 			}
-			// Launch the Claude Code CLI inside the terminal.
-			await instance.sendText(CLAUDE_TERMINAL_COMMAND, true);
+			// Launch the Claude Code CLI inside the terminal, loading Dim's built-in
+			// skills and agent hook via a bundled plugin so they apply automatically
+			// in every workspace with no dependency on `~/.claude` or a project `.claude/`.
+			const pluginRoot = await this._ensureBuiltinPlugin();
+			const command = pluginRoot
+				? `${CLAUDE_TERMINAL_COMMAND} --plugin-dir '${pluginRoot.fsPath.replace(/'/g, `'\\''`)}'`
+				: CLAUDE_TERMINAL_COMMAND;
+			await instance.sendText(command, true);
 		} finally {
 			this._creating = false;
+		}
+	}
+
+	/**
+	 * Materialize the Dim built-in Claude Code plugin on disk and return its root.
+	 *
+	 * The Ctrl+Alt+I terminal runs the standalone `claude` CLI, which does not read
+	 * Dim's SDK options or the `vs/sessions/skills` built-ins; it discovers skills
+	 * and hooks from its own configuration. To ship Dim's built-in skill and agent
+	 * hook to that CLI for every build and every workspace — with no dependency on
+	 * `~/.claude` or a project `.claude/` — we assemble a Claude Code plugin from the
+	 * files baked into the build and launch `claude --plugin-dir <root>`.
+	 *
+	 * The plugin is written under the user data home (a stable path so any one-time
+	 * plugin trust state persists) and is rebuilt on each launch so it tracks the
+	 * bundled sources. `--plugin-dir` requires a `.claude-plugin/` folder; the build
+	 * never copies dot-directories into `out/`, so the layout is generated here
+	 * rather than shipped directly. Returns `undefined` if assembly fails, in which
+	 * case the caller launches the CLI without the plugin.
+	 */
+	private async _ensureBuiltinPlugin(): Promise<URI | undefined> {
+		try {
+			const root = joinPath(this._environmentService.userRoamingDataHome, 'claudeTerminal', 'builtinPlugin');
+			const manifestDir = joinPath(root, '.claude-plugin');
+			const hooksDir = joinPath(root, 'hooks');
+			const skillDir = joinPath(root, 'skills', 'diagram-writing');
+			await this._fileService.createFolder(manifestDir);
+			await this._fileService.createFolder(hooksDir);
+			await this._fileService.createFolder(skillDir);
+
+			const manifest = {
+				name: 'dim-builtin',
+				description: 'Dim built-in skills and hooks.',
+				version: '0.0.0',
+				skills: ['./skills/']
+			};
+			const hooks = {
+				description: 'Dim built-in hooks',
+				hooks: {
+					// Fire once when the agent finishes its turn (end of its response),
+					// rather than before every tool call.
+					Stop: [{
+						matcher: '',
+						hooks: [{ type: 'command', command: 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/onAgentEvent.sh"' }]
+					}]
+				}
+			};
+			await this._fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
+			await this._fileService.writeFile(joinPath(hooksDir, 'hooks.json'), VSBuffer.fromString(JSON.stringify(hooks, null, '\t')));
+
+			// Copy the bundled hook script and skill straight from the build output so
+			// the plugin and Dim's native sessions share a single source of truth.
+			const hookSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/onAgentEvent.sh');
+			const skillSource = FileAccess.asFileUri('vs/sessions/skills/diagram-writing/SKILL.md');
+			await this._fileService.writeFile(joinPath(hooksDir, 'onAgentEvent.sh'), (await this._fileService.readFile(hookSource)).value);
+			await this._fileService.writeFile(joinPath(skillDir, 'SKILL.md'), (await this._fileService.readFile(skillSource)).value);
+
+			return root;
+		} catch (err) {
+			this._logService.error('[ClaudeTerminal] Failed to assemble the Dim built-in Claude plugin', err);
+			return undefined;
 		}
 	}
 
