@@ -187,6 +187,9 @@ export function buildMermaidConfig(
 ): MermaidConfig {
 	return {
 		startOnLoad: false,
+		// 'loose' lets diagrams use `click` directives (links/callbacks); upstream defaults to
+		// 'strict', which disables them. Relaxed here so mermaid nodes can act as hyperlinks.
+		securityLevel: 'loose',
 		...vsCodeThemeTracker.resolveMermaidTheme(extensionConfig),
 	};
 }

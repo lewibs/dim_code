@@ -2,6 +2,12 @@
 
 Where Dim (this VS Code fork) stores project-related files, and how to persist our own per-project data.
 
+## TODO
+- [ ] check for changes since last commit and make sure diagrams are up to date based on the files changed
+- [ ] when the user pulls chekc if any diagrams exist for the files cahnge and if so make sure to update them based on the changse
+- [ ] clickable diagrams control+f for flow diagram for a function, just clicking on the function shows the code. Clicking on a box should show the microservice or open the class file?
+- [ ]
+
 ## Product naming (from `product.json`)
 
 | Field | Value | Used for |
@@ -39,6 +45,31 @@ Project-scoped contents under that root:
         └── <hash-of-folderB>/
             ├── workspace.json   { "folder": "file:///home/you/projectB" }
             └── state.vscdb
+```
+
+The same layout as a diagram (open the Markdown preview with Ctrl+Shift+V to see it render):
+
+```mermaid
+flowchart TD
+    A["Open folder: /home/you/projectA"] -->|"MD5(file:///home/you/projectA)"| HA
+    B["Open folder: /home/you/projectB"] -->|"MD5(file:///home/you/projectB)"| HB
+
+    subgraph Root["~/.config/Dim/User/workspaceStorage/"]
+        HA["hashA/"]
+        HB["hashB/"]
+    end
+
+    HA --> WA["workspace.json<br/>maps hash to folder"]
+    HA --> SA["state.vscdb<br/>key/value state"]
+    HA --> NA["notes.md<br/>our per-project file"]
+
+    HB --> WB["workspace.json"]
+    HB --> SB["state.vscdb"]
+
+    classDef ours fill:#2d6a4f,stroke:#95d5b2,color:#fff;
+    class NA ours;
+
+    click NA "AGENTS.md" "Open AGENTS.md"
 ```
 
 - `<hash>` is an **MD5 of the folder's URI** (e.g. `file:///home/you/projectB`). Each distinct folder → distinct hash → its own subfolder.
@@ -114,3 +145,98 @@ Result lands at `~/.config/Dim/User/workspaceStorage/<hash>/notes.md`, automatic
 - Use `IFileService`, not `node:fs` — it works in web/remote, resolves the scheme, and creates missing parent directories.
 - A raw file dropped in `workspaceStorage` is **not** auto-cleaned (unlike `state.vscdb` keys); it persists until deleted.
 - **Empty window:** with no folder/workspace open, `getWorkspace().id` is the empty-window id and the file goes into a bucket that may be recycled. Guard on `getWorkbenchState() !== WorkbenchState.EMPTY` if the feature only makes sense with a folder open.
+
+## Diagram examples
+
+A sampler of mermaid diagram types, for reference. Open the Markdown preview (Ctrl+Shift+V) to see them rendered.
+
+### Class diagram — type/class structure
+
+```mermaid
+classDiagram
+    class IEditorService {
+        <<interface>>
+        +openEditor(input) Promise
+    }
+    class EditorService {
+        +openEditor(input) Promise
+    }
+    class EditorPart
+    IEditorService <|.. EditorService
+    EditorService --> EditorPart : uses
+```
+
+### Dependency graph — module layering
+
+```mermaid
+flowchart LR
+    base --> platform
+    platform --> editor
+    editor --> workbench
+    workbench --> sessions
+    base --> editor
+    base --> workbench
+```
+
+### C4 context — architecture at a zoom level
+
+```mermaid
+C4Context
+    title Dim — System Context
+    Person(dev, "Developer")
+    System(dim, "Dim", "VS Code fork")
+    System_Ext(claude, "Claude CLI", "Agent backend")
+    Rel(dev, dim, "Edits code, runs agents")
+    Rel(dim, claude, "Spawns agent, streams output")
+```
+
+### ER diagram — data model
+
+```mermaid
+erDiagram
+    WORKSPACE ||--o{ STORAGE_ENTRY : holds
+    WORKSPACE {
+        string id "MD5 of folder URI"
+        string folder
+    }
+    STORAGE_ENTRY {
+        string key
+        string value
+    }
+```
+
+### Sequence diagram — runtime control flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant WB as Workbench
+    participant Term as Terminal
+    participant CLI as Claude CLI
+    User->>WB: Ctrl+Alt+I
+    WB->>Term: Create terminal
+    Term->>CLI: Launch with claudeSdkOptions
+    CLI-->>Term: Stream output
+    Term-->>User: Show session
+```
+
+### Flowchart — branching logic
+
+```mermaid
+flowchart TD
+    A[update called] --> B{shouldRenderHint?}
+    B -- no --> C[Dispose hint]
+    B -- yes --> D{Widget exists?}
+    D -- no --> E[Create hint widget]
+    D -- yes --> F[Keep existing]
+```
+
+### State diagram — lifecycle / state machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Active: onWillStartSession
+    Active --> Idle: onDidEndSession
+    Active --> [*]: dispose
+```

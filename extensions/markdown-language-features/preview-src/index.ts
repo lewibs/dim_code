@@ -739,29 +739,34 @@ document.addEventListener('click', event => {
 
 	let node = event.target as Element | null;
 	while (node) {
-		if (node.tagName && node.tagName === 'A' && (node as HTMLAnchorElement).href) {
-			if (node.getAttribute('href')?.startsWith('#')) {
-				return;
-			}
-
-			let hrefText = node.getAttribute('data-href');
-			if (!hrefText) {
-				hrefText = node.getAttribute('href');
-				// Pass through known schemes
-				if (hrefText && passThroughLinkSchemes.some(scheme => hrefText!.startsWith(scheme))) {
+		// Match both HTML anchors (tagName 'A') and SVG anchors (tagName 'a', e.g. links inside
+		// rendered mermaid diagrams). SVG anchors expose the target via the `xlink:href` attribute.
+		if (node.tagName?.toUpperCase() === 'A') {
+			const rawHref = node.getAttribute('href') ?? node.getAttribute('xlink:href');
+			if (rawHref || node.getAttribute('data-href')) {
+				if (node.getAttribute('href')?.startsWith('#')) {
 					return;
 				}
-			}
 
-			// If original link doesn't look like a url, delegate back to VS Code to resolve
-			if (hrefText && !/^[a-z\-]+:/i.test(hrefText)) {
-				messaging.postMessage('openLink', { href: hrefText });
-				event.preventDefault();
-				event.stopPropagation();
+				let hrefText = node.getAttribute('data-href');
+				if (!hrefText) {
+					hrefText = rawHref;
+					// Pass through known schemes
+					if (hrefText && passThroughLinkSchemes.some(scheme => hrefText!.startsWith(scheme))) {
+						return;
+					}
+				}
+
+				// If original link doesn't look like a url, delegate back to VS Code to resolve
+				if (hrefText && !/^[a-z\-]+:/i.test(hrefText)) {
+					messaging.postMessage('openLink', { href: hrefText });
+					event.preventDefault();
+					event.stopPropagation();
+					return;
+				}
+
 				return;
 			}
-
-			return;
 		}
 		node = node.parentElement;
 	}
