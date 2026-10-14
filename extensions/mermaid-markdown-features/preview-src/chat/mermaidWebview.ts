@@ -81,7 +81,7 @@ export class PanZoomHandler {
 		// Click to zoom (Alt+click = zoom in, Alt+Shift+click = zoom out)
 		this.container.addEventListener('click', e => this.handleClick(e));
 
-		// Trackpad: pinch = zoom, Alt + two-finger scroll = zoom
+		// Wheel, trackpad scroll and pinch all zoom (see handleWheel).
 		this.container.addEventListener('wheel', e => this.handleWheel(e), { passive: false });
 
 		// Update cursor when Alt/Option key is pressed
@@ -111,12 +111,13 @@ export class PanZoomHandler {
 			return;
 		}
 
-		if (altKey && !shiftKey) {
-			this.container.style.cursor = 'grab';
-		} else if (altKey && shiftKey) {
+		if (altKey && shiftKey) {
 			this.container.style.cursor = 'zoom-out';
+		} else if (altKey) {
+			this.container.style.cursor = 'zoom-in';
 		} else {
-			this.container.style.cursor = 'default';
+			// Left-click drag always pans, so grab is the resting cursor.
+			this.container.style.cursor = 'grab';
 		}
 	}
 
@@ -139,43 +140,37 @@ export class PanZoomHandler {
 	}
 
 	private handleWheel(e: WheelEvent): void {
-		// Only zoom when Alt is held (or ctrlKey for pinch-to-zoom gestures)
-		// ctrlKey is set by browsers for pinch-to-zoom gestures
+		// The diagram fills the viewport, so there is nothing to scroll past:
+		// the wheel, a trackpad two-finger scroll and a pinch gesture all zoom.
+		// ctrlKey is set by browsers for pinch-to-zoom gestures.
 		const isPinchZoom = e.ctrlKey;
 
-		if (!e.altKey && !isPinchZoom) {
-			// Allow normal scrolling when Alt is not held
-			return;
-		}
+		e.preventDefault();
+		e.stopPropagation();
 
-		if (isPinchZoom || e.altKey) {
-			// Pinch gesture or Alt + two-finger drag = zoom
-			e.preventDefault();
-			e.stopPropagation();
+		const rect = this.container.getBoundingClientRect();
+		const mouseX = e.clientX - rect.left;
+		const mouseY = e.clientY - rect.top;
 
-			const rect = this.container.getBoundingClientRect();
-			const mouseX = e.clientX - rect.left;
-			const mouseY = e.clientY - rect.top;
+		// Calculate zoom (scroll up = zoom in, scroll down = zoom out).
+		// Pinch gestures have smaller deltaY values, so use a higher factor.
+		const effectiveZoomFactor = isPinchZoom ? this.zoomFactor * 5 : this.zoomFactor;
+		const delta = -e.deltaY * effectiveZoomFactor;
+		const newScale = Math.min(this.maxScale, Math.max(this.minScale, this.scale * (1 + delta)));
 
-			// Calculate zoom (scroll up = zoom in, scroll down = zoom out)
-			// Pinch gestures have smaller deltaY values, so use a higher factor
-			const effectiveZoomFactor = isPinchZoom ? this.zoomFactor * 5 : this.zoomFactor;
-			const delta = -e.deltaY * effectiveZoomFactor;
-			const newScale = Math.min(this.maxScale, Math.max(this.minScale, this.scale * (1 + delta)));
+		// Zoom toward the pointer position.
+		const scaleFactor = newScale / this.scale;
+		this.translateX = mouseX - (mouseX - this.translateX) * scaleFactor;
+		this.translateY = mouseY - (mouseY - this.translateY) * scaleFactor;
+		this.scale = newScale;
 
-			// Zoom toward mouse position
-			const scaleFactor = newScale / this.scale;
-			this.translateX = mouseX - (mouseX - this.translateX) * scaleFactor;
-			this.translateY = mouseY - (mouseY - this.translateY) * scaleFactor;
-			this.scale = newScale;
-
-			this.applyTransform();
-			this.saveState();
-		}
+		this.applyTransform();
+		this.saveState();
 	}
 
 	private handleMouseDown(e: MouseEvent): void {
-		if (e.button !== 0 || (!this.panModeEnabled && !e.altKey)) {
+		// Left-click drag always pans.
+		if (e.button !== 0) {
 			return;
 		}
 		e.preventDefault();
