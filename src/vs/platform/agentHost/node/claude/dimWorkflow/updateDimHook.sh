@@ -60,8 +60,19 @@ echo "$changed" | while IFS= read -r line; do
 	target="$DIM_DIM_DIR/$path.dim"
 	mkdir -p "$(dirname "$target")"
 
-	# Records are kept empty for now; only their existence matters.
-	: > "$target"
+	# Seed a dummy UML diagram; a `.dim` file is rendered as a mermaid diagram.
+	# This mirrors `dimPlaceholderDiagram` in dimHookStorage.ts; keep them in sync.
+	cat > "$target" <<'DIM_PLACEHOLDER'
+classDiagram
+	class Example {
+		+String name
+		+doWork() void
+	}
+	class Helper {
+		+assist() void
+	}
+	Example --> Helper : uses
+DIM_PLACEHOLDER
 
 	echo "Wrote $target"
 done

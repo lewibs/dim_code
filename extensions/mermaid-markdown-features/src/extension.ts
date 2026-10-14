@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import { registerChatSupport } from './chatOutputRenderer';
+import { DimEditorProvider, dimEditorViewType } from './dimEditor';
 import { MermaidEditorManager } from './editorManager';
 import { configSection, injectMermaidConfig } from './markdownMermaid/config';
 import { extendMarkdownItWithMermaid } from './markdownMermaid/markdownIt';
@@ -18,6 +19,16 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Register chat support
 	context.subscriptions.push(registerChatSupport(context, webviewManager, editorManager));
+
+	// Register the Dim diagram editor so `.dim` files auto-render as mermaid.
+	context.subscriptions.push(vscode.window.registerCustomEditorProvider(
+		dimEditorViewType,
+		new DimEditorProvider(context.extensionUri, webviewManager),
+		{
+			webviewOptions: { retainContextWhenHidden: false },
+			supportsMultipleEditorsPerDocument: true
+		}
+	));
 
 	// Register commands
 	context.subscriptions.push(

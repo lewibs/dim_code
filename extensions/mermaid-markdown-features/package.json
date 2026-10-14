@@ -26,9 +26,22 @@
   "main": "./out/extension",
   "browser": "./dist/browser/extension",
   "activationEvents": [
-    "onWebviewPanel:vscode.mermaid-markdown-features.preview"
+    "onWebviewPanel:vscode.mermaid-markdown-features.preview",
+    "onCustomEditor:vscode.mermaid-markdown-features.dimEditor"
   ],
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "vscode.mermaid-markdown-features.dimEditor",
+        "displayName": "%customEditor.dimEditor.displayName%",
+        "selector": [
+          {
+            "filenamePattern": "*.dim"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "commands": [
       {
         "command": "_mermaid-markdown.resetPanZoom",

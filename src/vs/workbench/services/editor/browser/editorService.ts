@@ -36,7 +36,8 @@ import { findGroup } from '../common/editorGroupFinder.js';
 import { ITextEditorService } from '../../textfile/common/textEditorService.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
-import { dimHookRecordUri, isDimCodeFile } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { dimHookRecordUri, dimPlaceholderDiagram, isDimCodeFile } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
 
 export class EditorService extends Disposable implements EditorServiceImpl {
 
@@ -541,9 +542,9 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	 * {@link openEditor}/{@link openEditors}, so swapping the resource at those
 	 * two call sites redirects them all with a single seam.
 	 *
-	 * The record is created empty on first open when it does not exist yet, so
-	 * every workspace file resolves to a record. The agent's Stop hook likewise
-	 * only ensures the record exists; records are kept empty for now.
+	 * The record is created on first open when it does not exist yet, seeded with
+	 * a placeholder diagram, so every workspace file resolves to a record; the
+	 * `.dim` custom editor renders the record's contents as a mermaid diagram.
 	 *
 	 * Returns `undefined` whenever there is no record to show: the open is not a
 	 * plain resource input (diff, merge or an already-typed input), the file is
@@ -577,7 +578,8 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		}
 
 		if (!(await this.fileService.exists(record))) {
-			await this.fileService.createFile(record); // empty record, filled later by the agent hook
+			// Seed a dummy diagram; the `.dim` editor renders the content as mermaid.
+			await this.fileService.createFile(record, VSBuffer.fromString(dimPlaceholderDiagram));
 		}
 
 		return record;

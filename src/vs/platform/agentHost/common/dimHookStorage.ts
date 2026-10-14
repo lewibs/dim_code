@@ -28,6 +28,23 @@ const dimCodeExtensions = new Set<string>([
 ]);
 
 /**
+ * Placeholder contents written into a freshly created `.dim` record. A `.dim`
+ * file is rendered as a mermaid diagram (its whole content is the diagram
+ * source), so a new record seeds a dummy UML class diagram until the agent fills
+ * it in. Mirrored by the `updateDimHook.sh` agent hook; keep the two in sync.
+ */
+export const dimPlaceholderDiagram = `classDiagram
+	class Example {
+		+String name
+		+doWork() void
+	}
+	class Helper {
+		+assist() void
+	}
+	Example --> Helper : uses
+`;
+
+/**
  * Whether a file is a source-code file that Dim should give a `.dim` change
  * record. Matching is by file extension against {@link dimCodeExtensions}.
  *

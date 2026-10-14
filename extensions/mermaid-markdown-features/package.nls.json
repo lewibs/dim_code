@@ -4,6 +4,7 @@
 	"command.resetPanZoom.title": "Reset Pan and Zoom",
 	"command.openInEditor.title": "Open Diagram in Editor",
 	"command.copySource.title": "Copy Diagram Source",
+	"customEditor.dimEditor.displayName": "Dim Diagram",
 	"config.title": "Mermaid",
 	"config.markdown-mermaid.lightModeTheme.description": "Default Mermaid theme for light mode.",
 	"config.markdown-mermaid.darkModeTheme.description": "Default Mermaid theme for dark mode.",

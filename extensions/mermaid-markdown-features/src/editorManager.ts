@@ -203,94 +203,105 @@ class MermaidPreview extends Disposable {
 	}
 
 	private _getHtml(): string {
-		const nonce = generateUuid();
-
-		const mediaRoot = vscode.Uri.joinPath(this._extensionUri, 'chat-webview-out');
-		const scriptUri = this._webviewPanel.webview.asWebviewUri(
-			vscode.Uri.joinPath(mediaRoot, 'index-editor.js')
-		);
-		const codiconsUri = this._webviewPanel.webview.asWebviewUri(
-			vscode.Uri.joinPath(mediaRoot, 'codicon.css')
-		);
-		const togglePanModeLabel = vscode.l10n.t('Toggle Pan Mode');
-		const zoomOutLabel = vscode.l10n.t('Zoom Out');
-		const zoomInLabel = vscode.l10n.t('Zoom In');
-		const resetPanZoomLabel = vscode.l10n.t('Reset Pan and Zoom');
-
-		return /* html */`<!DOCTYPE html>
-			<html lang="en">
-			<head>
-				<meta charset="UTF-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				<title>Mermaid Diagram</title>
-				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src 'nonce-${nonce}'; style-src ${this._webviewPanel.webview.cspSource} 'unsafe-inline'; font-src data:;" />
-				<link rel="stylesheet" type="text/css" href="${codiconsUri}">
-				<style>
-					html, body {
-						margin: 0;
-						padding: 0;
-						height: 100%;
-						width: 100%;
-						overflow: hidden;
-					}
-					.mermaid {
-						visibility: hidden;
-					}
-					.mermaid.rendered {
-						visibility: visible;
-					}
-					.mermaid-wrapper {
-						height: 100%;
-						width: 100%;
-					}
-					.zoom-controls {
-						position: absolute;
-						top: 8px;
-						right: 8px;
-						display: flex;
-						gap: 2px;
-						z-index: 100;
-						background: var(--vscode-editorWidget-background);
-						border: 1px solid var(--vscode-editorWidget-border);
-						border-radius: 6px;
-						padding: 3px;
-					}
-					.zoom-controls button {
-						display: flex;
-						align-items: center;
-						justify-content: center;
-						width: 26px;
-						height: 26px;
-						background: transparent;
-						color: var(--vscode-icon-foreground);
-						border: none;
-						border-radius: 4px;
-						cursor: pointer;
-					}
-					.zoom-controls button:hover {
-						background: var(--vscode-toolbar-hoverBackground);
-					}
-					.zoom-controls button.active {
-						background: var(--vscode-toolbar-activeBackground);
-						color: var(--vscode-focusBorder);
-					}
-				</style>
-			</head>
-			<body data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: this.diagramId })}' data-vscode-mermaid-webview-id="${this.diagramId}">
-				${renderMermaidConfigSpan()}
-				<div class="zoom-controls">
-					<button class="pan-mode-btn" title="${togglePanModeLabel}" aria-label="${togglePanModeLabel}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i></button>
-					<button class="zoom-out-btn" title="${zoomOutLabel}" aria-label="${zoomOutLabel}"><i class="codicon codicon-zoom-out" aria-hidden="true"></i></button>
-					<button class="zoom-in-btn" title="${zoomInLabel}" aria-label="${zoomInLabel}"><i class="codicon codicon-zoom-in" aria-hidden="true"></i></button>
-					<button class="zoom-reset-btn" title="${resetPanZoomLabel}" aria-label="${resetPanZoomLabel}"><i class="codicon codicon-screen-normal" aria-hidden="true"></i></button>
-				</div>
-				<pre class="mermaid">
-					${escapeHtmlText(this._mermaidSource)}
-				</pre>
-				<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
-			</body>
-			</html>`;
+		return getMermaidEditorHtml(this._webviewPanel.webview, this._extensionUri, this._mermaidSource, this.diagramId);
 	}
+}
+
+/**
+ * Builds the full-viewport mermaid webview HTML shared by the diagram preview
+ * panel and the `.dim` custom editor. The diagram source is embedded in the
+ * `.mermaid` element and rendered by the `index-editor` webview script, which
+ * also wires up the pan/zoom controls.
+ *
+ * @param webview The webview the HTML is rendered into (for resource URIs and CSP).
+ * @param extensionUri The extension root, used to resolve the webview bundle.
+ * @param mermaidSource The mermaid diagram source to render.
+ * @param diagramId The id used to address this webview for pan/zoom commands.
+ */
+export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, mermaidSource: string, diagramId: string): string {
+	const nonce = generateUuid();
+
+	const mediaRoot = vscode.Uri.joinPath(extensionUri, 'chat-webview-out');
+	const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'index-editor.js'));
+	const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'codicon.css'));
+	const togglePanModeLabel = vscode.l10n.t('Toggle Pan Mode');
+	const zoomOutLabel = vscode.l10n.t('Zoom Out');
+	const zoomInLabel = vscode.l10n.t('Zoom In');
+	const resetPanZoomLabel = vscode.l10n.t('Reset Pan and Zoom');
+
+	return /* html */`<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<title>Mermaid Diagram</title>
+			<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src 'nonce-${nonce}'; style-src ${webview.cspSource} 'unsafe-inline'; font-src data:;" />
+			<link rel="stylesheet" type="text/css" href="${codiconsUri}">
+			<style>
+				html, body {
+					margin: 0;
+					padding: 0;
+					height: 100%;
+					width: 100%;
+					overflow: hidden;
+				}
+				.mermaid {
+					visibility: hidden;
+				}
+				.mermaid.rendered {
+					visibility: visible;
+				}
+				.mermaid-wrapper {
+					height: 100%;
+					width: 100%;
+				}
+				.zoom-controls {
+					position: absolute;
+					top: 8px;
+					right: 8px;
+					display: flex;
+					gap: 2px;
+					z-index: 100;
+					background: var(--vscode-editorWidget-background);
+					border: 1px solid var(--vscode-editorWidget-border);
+					border-radius: 6px;
+					padding: 3px;
+				}
+				.zoom-controls button {
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					width: 26px;
+					height: 26px;
+					background: transparent;
+					color: var(--vscode-icon-foreground);
+					border: none;
+					border-radius: 4px;
+					cursor: pointer;
+				}
+				.zoom-controls button:hover {
+					background: var(--vscode-toolbar-hoverBackground);
+				}
+				.zoom-controls button.active {
+					background: var(--vscode-toolbar-activeBackground);
+					color: var(--vscode-focusBorder);
+				}
+			</style>
+		</head>
+		<body data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
+			${renderMermaidConfigSpan()}
+			<div class="zoom-controls">
+				<button class="pan-mode-btn" title="${togglePanModeLabel}" aria-label="${togglePanModeLabel}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i></button>
+				<button class="zoom-out-btn" title="${zoomOutLabel}" aria-label="${zoomOutLabel}"><i class="codicon codicon-zoom-out" aria-hidden="true"></i></button>
+				<button class="zoom-in-btn" title="${zoomInLabel}" aria-label="${zoomInLabel}"><i class="codicon codicon-zoom-in" aria-hidden="true"></i></button>
+				<button class="zoom-reset-btn" title="${resetPanZoomLabel}" aria-label="${resetPanZoomLabel}"><i class="codicon codicon-screen-normal" aria-hidden="true"></i></button>
+			</div>
+			<pre class="mermaid">
+				${escapeHtmlText(mermaidSource)}
+			</pre>
+			<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
+		</body>
+		</html>`;
 }
 
 
