@@ -35,6 +35,8 @@ import { IHostService } from '../../host/browser/host.js';
 import { findGroup } from '../common/editorGroupFinder.js';
 import { ITextEditorService } from '../../textfile/common/textEditorService.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
+import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
+import { dimHookRecordUri } from '../../../../platform/agentHost/common/dimHookStorage.js';
 
 export class EditorService extends Disposable implements EditorServiceImpl {
 
@@ -79,7 +81,8 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		@IEditorResolverService private readonly editorResolverService: IEditorResolverService,
 		@IWorkspaceTrustRequestService private readonly workspaceTrustRequestService: IWorkspaceTrustRequestService,
 		@IHostService private readonly hostService: IHostService,
-		@ITextEditorService private readonly textEditorService: ITextEditorService
+		@ITextEditorService private readonly textEditorService: ITextEditorService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService
 	) {
 		super();
 
@@ -93,7 +96,7 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	}
 
 	createScoped(editorGroupsContainer: IEditorGroupsContainer, disposables: DisposableStore): IEditorService {
-		return disposables.add(new EditorService(editorGroupsContainer, this.editorGroupService, this.instantiationService, this.fileService, this.configurationService, this.contextService, this.uriIdentityService, this.editorResolverService, this.workspaceTrustRequestService, this.hostService, this.textEditorService));
+		return disposables.add(new EditorService(editorGroupsContainer, this.editorGroupService, this.instantiationService, this.fileService, this.configurationService, this.contextService, this.uriIdentityService, this.editorResolverService, this.workspaceTrustRequestService, this.hostService, this.textEditorService, this.environmentService));
 	}
 
 	private registerListeners(): void {
@@ -528,6 +531,55 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 
 	//#endregion
 
+	//#region Dim: open the `.dim` change record of a file
+
+	/**
+	 * Dim: resolve the companion `.dim` change record a file open should be
+	 * redirected to, or `undefined` to open the file itself. Every open path in
+	 * the workbench — the explorer, Quick Open (Ctrl+P), Go to File,
+	 * drag-and-drop — funnels an untyped resource input through
+	 * {@link openEditor}/{@link openEditors}, so swapping the resource at those
+	 * two call sites redirects them all with a single seam.
+	 *
+	 * The record is created empty on first open when it does not exist yet, so
+	 * every workspace file resolves to a record. The agent's Stop hook likewise
+	 * only ensures the record exists; records are kept empty for now.
+	 *
+	 * Returns `undefined` whenever there is no record to show: the open is not a
+	 * plain resource input (diff, merge or an already-typed input), the file is
+	 * not part of the open workspace, or it is itself a record under the storage
+	 * root (guarding against a redirect loop). Those opens still show themselves.
+	 */
+	private async dimRecordFor(editor: EditorInput | IUntypedEditorInput): Promise<URI | undefined> {
+		if (!isResourceEditorInput(editor)) {
+			return undefined;
+		}
+
+		const resource = editor.resource;
+		const storageHome = this.environmentService.workspaceStorageHome;
+		if (this.uriIdentityService.extUri.isEqualOrParent(resource, storageHome)) {
+			return undefined; // already a record: never redirect onto ourselves
+		}
+
+		const folder = this.contextService.getWorkspaceFolder(resource);
+		if (!folder) {
+			return undefined;
+		}
+
+		const record = dimHookRecordUri(storageHome, folder.uri, resource);
+		if (!record) {
+			return undefined;
+		}
+
+		if (!(await this.fileService.exists(record))) {
+			await this.fileService.createFile(record); // empty record, filled later by the agent hook
+		}
+
+		return record;
+	}
+
+	//#endregion
+
 	//#region openEditor()
 
 	openEditor(editor: EditorInput, options?: IEditorOptions, group?: PreferredGroup): Promise<IEditorPane | undefined>;
@@ -538,6 +590,12 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	openEditor(editor: IResourceDiffEditorInput, group?: PreferredGroup): Promise<ITextDiffEditorPane | undefined>;
 	openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined>;
 	async openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined> {
+		// Dim: open the file's `.dim` change record when one exists
+		const dimRecord = await this.dimRecordFor(editor);
+		if (dimRecord && isResourceEditorInput(editor)) {
+			editor = { ...editor, resource: dimRecord };
+		}
+
 		let typedEditor: EditorInput | undefined = undefined;
 		let options = isEditorInput(editor) ? optionsOrPreferredGroup as IEditorOptions : editor.options;
 		let group: IEditorGroup | undefined = undefined;
@@ -617,7 +675,15 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 
 		// Find target groups for editors to open
 		const mapGroupToTypedEditors = new Map<IEditorGroup, Array<EditorInputWithOptions>>();
-		for (const editor of editors) {
+		for (let editor of editors) {
+			// Dim: open each file's `.dim` change record when one exists
+			if (!isEditorInputWithOptions(editor)) {
+				const dimRecord = await this.dimRecordFor(editor);
+				if (dimRecord && isResourceEditorInput(editor)) {
+					editor = { ...editor, resource: dimRecord };
+				}
+			}
+
 			let typedEditor: EditorInputWithOptions | undefined = undefined;
 			let group: IEditorGroup | undefined = undefined;
 

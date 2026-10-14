@@ -4,8 +4,8 @@
 #  Licensed under the MIT License. See License.txt in the project root for license information.
 # ---------------------------------------------------------------------------------------------
 # Dim built-in agent hook. Runs once when the agent finishes a turn (Stop) and,
-# for every file changed in the workspace since the last commit, writes a
-# companion "<file>.dim" change record capturing what was updated.
+# for every file changed in the workspace since the last commit, ensures an empty
+# companion "<file>.dim" record exists.
 #
 # Inputs (set by the caller):
 #   cwd          - the workspace root, so git sees the project repository
@@ -29,13 +29,10 @@ if [ -z "$changed" ]; then
 	exit 0
 fi
 
-now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
 # git status --porcelain emits two status chars, a space, then the path. For a
 # rename the path is "old -> new"; we record the new path. Other quoting cases
 # (paths with unusual characters) are left to git's defaults.
 echo "$changed" | while IFS= read -r line; do
-	status=$(printf '%s' "$line" | cut -c1-2)
 	path=$(printf '%s' "$line" | cut -c4-)
 	case "$path" in
 		*" -> "*) path=${path##* -> } ;;
@@ -49,32 +46,8 @@ echo "$changed" | while IFS= read -r line; do
 	target="$DIM_DIM_DIR/$path.dim"
 	mkdir -p "$(dirname "$target")"
 
-	{
-		echo "# Dim change record"
-		echo "# file: $path"
-		echo "# status: $status"
-		echo "# updated: $now"
-		echo "# ---"
-		case "$status" in
-			# Untracked file: no diff against HEAD, so capture its current contents.
-			"??")
-				if [ -f "$path" ]; then
-					echo "new file; contents:"
-					cat "$path"
-				else
-					echo "new (untracked) path: $path"
-				fi
-				;;
-			*)
-				diff=$(git diff HEAD -- "$path" 2>/dev/null)
-				if [ -n "$diff" ]; then
-					echo "$diff"
-				else
-					echo "(no textual diff available for status '$status')"
-				fi
-				;;
-		esac
-	} > "$target"
+	# Records are kept empty for now; only their existence matters.
+	: > "$target"
 
 	echo "Wrote $target"
 done

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { stringHash } from '../../../base/common/hash.js';
-import { joinPath } from '../../../base/common/resources.js';
+import { joinPath, relativePath } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 
 /**
@@ -25,4 +25,27 @@ import { URI } from '../../../base/common/uri.js';
 export function dimHookStorageDir(workspaceStorageHome: URI, workspaceFolder: URI): URI {
 	const key = (stringHash(workspaceFolder.toString(), 0) >>> 0).toString(16);
 	return joinPath(workspaceStorageHome, 'dim', key);
+}
+
+/**
+ * Resolves the `.dim` change record that the Dim `updateDimHook` agent hook
+ * writes for a given workspace file, or `undefined` when the file does not live
+ * inside the workspace folder.
+ *
+ * The record mirrors the file's workspace-relative path with a `.dim` suffix
+ * under {@link dimHookStorageDir}, matching the hook's layout
+ * (`src/foo.ts` -> `<dir>/src/foo.ts.dim`). This is the TypeScript counterpart of
+ * the path the hook builds from `git status`, so callers that redirect a file
+ * open to its record resolve the same location the hook wrote.
+ *
+ * @param workspaceStorageHome The `workspaceStorageHome` from the environment service.
+ * @param workspaceFolder The workspace folder the file belongs to.
+ * @param file The workspace file whose change record is wanted.
+ */
+export function dimHookRecordUri(workspaceStorageHome: URI, workspaceFolder: URI, file: URI): URI | undefined {
+	const relative = relativePath(workspaceFolder, file);
+	if (relative === undefined || relative.length === 0 || relative.startsWith('..')) {
+		return undefined; // the file is outside the workspace folder
+	}
+	return joinPath(dimHookStorageDir(workspaceStorageHome, workspaceFolder), `${relative}.dim`);
 }
