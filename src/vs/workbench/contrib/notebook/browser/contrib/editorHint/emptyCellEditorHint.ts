@@ -7,7 +7,6 @@ import { Schemas } from '../../../../../../base/common/network.js';
 import { ICodeEditor } from '../../../../../../editor/browser/editorBrowser.js';
 import { EditorContributionInstantiation, registerEditorContribution } from '../../../../../../editor/browser/editorExtensions.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
-import { IChatAgentService } from '../../../../chat/common/participants/chatAgents.js';
 import { EmptyTextEditorHintContribution } from '../../../../codeEditor/browser/emptyTextEditorHint/emptyTextEditorHint.js';
 import { IInlineChatSessionService } from '../../../../inlineChat/browser/inlineChatSessionService.js';
 import { getNotebookEditorFromEditorPane } from '../../notebookBrowser.js';
@@ -21,14 +20,12 @@ export class EmptyCellEditorHintContribution extends EmptyTextEditorHintContribu
 		@IEditorService private readonly _editorService: IEditorService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IInlineChatSessionService inlineChatSessionService: IInlineChatSessionService,
-		@IChatAgentService chatAgentService: IChatAgentService,
 		@IInstantiationService instantiationService: IInstantiationService
 	) {
 		super(
 			editor,
 			configurationService,
 			inlineChatSessionService,
-			chatAgentService,
 			instantiationService
 		);
 

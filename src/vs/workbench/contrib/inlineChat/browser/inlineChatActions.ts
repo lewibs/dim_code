@@ -55,15 +55,6 @@ export class StartSessionAction extends Action2 {
 			category: AbstractInlineChatAction.category,
 			f1: true,
 			precondition: ContextKeyExpr.and(inlineChatContextKey, ContextKeyExpr.or(CTX_INLINE_CHAT_FILE_BELONGS_TO_CHAT.negate(), CTX_ASK_IN_CHAT_ENABLED.negate())),
-			keybinding: {
-				when: ContextKeyExpr.and(
-					EditorContextKeys.focus,
-					inlineChatContextKey,
-					ContextKeyExpr.or(CTX_INLINE_CHAT_FILE_BELONGS_TO_CHAT.negate(), CTX_ASK_IN_CHAT_ENABLED.negate())
-				),
-				weight: KeybindingWeight.WorkbenchContrib,
-				primary: KeyMod.CtrlCmd | KeyCode.KeyI
-			},
 			icon: START_INLINE_CHAT,
 			menu: [{
 				id: MenuId.EditorContext,
@@ -408,11 +399,6 @@ export class AskInChatAction extends EditorAction2 {
 			category: AbstractInlineChatAction.category,
 			f1: true,
 			precondition: ContextKeyExpr.and(inlineChatContextKey, CTX_INLINE_CHAT_FILE_BELONGS_TO_CHAT, CTX_ASK_IN_CHAT_ENABLED),
-			keybinding: {
-				when: EditorContextKeys.focus,
-				weight: KeybindingWeight.WorkbenchContrib,
-				primary: KeyMod.CtrlCmd | KeyCode.KeyI
-			},
 			icon: Codicon.chatSparkle,
 			menu: [{
 				id: MenuId.EditorContext,
