@@ -11,6 +11,7 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
+import { dimHookStorageDir } from '../../common/dimHookStorage.js';
 import { INativeEnvironmentService } from '../../../environment/common/environment.js';
 import { IFileService } from '../../../files/common/files.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
@@ -203,6 +204,17 @@ export class ClaudeAgentSession extends Disposable {
 		return this._workingDirectory ?? this.workspace;
 	}
 	private _workingDirectory: URI | undefined;
+
+	/**
+	 * Directory under the workspace-storage root where the bundled Dim `Stop`
+	 * hook writes per-file `.dim` change records for this session's workspace,
+	 * keeping them out of the repo. `undefined` when no folder is open, in which
+	 * case the hook records nothing.
+	 */
+	private get _dimHookStorageDir(): URI | undefined {
+		const cwd = this.workingDirectory;
+		return cwd ? dimHookStorageDir(this._environmentService.workspaceStorageHome, cwd) : undefined;
+	}
 
 	/**
 	 * The additional (non-primary) working directories this session's agent is
@@ -654,6 +666,7 @@ export class ClaudeAgentSession extends Disposable {
 				traceContext,
 				getUserPromptAdditionalContext: () => this._hostInstructions?.join('\n\n'),
 				onPreToolUse: (toolName, input) => this._restrictAgentMergeGitHubTool(toolName, input, agentMergeRestrictedMcpServerNames),
+				dimHookStorageDir: this._dimHookStorageDir,
 			},
 			ctx.transport,
 			data => this._logService.error(`[Claude SDK stderr] ${data}`),
@@ -770,6 +783,7 @@ export class ClaudeAgentSession extends Disposable {
 						traceContext,
 						getUserPromptAdditionalContext: () => this._hostInstructions?.join('\n\n'),
 						onPreToolUse: (toolName, input) => this._restrictAgentMergeGitHubTool(toolName, input, rebuildAgentMergeRestrictedMcpServerNames),
+						dimHookStorageDir: this._dimHookStorageDir,
 					},
 					rebuildTransport,
 					data => this._logService.error(`[Claude SDK stderr] ${data}`),

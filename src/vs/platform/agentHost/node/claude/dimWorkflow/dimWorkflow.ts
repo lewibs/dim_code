@@ -14,22 +14,34 @@ import { FileAccess } from '../../../../../base/common/network.js';
  * dependency on `~/.claude`.
  */
 function dimHookScriptPath(): string {
-	return FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/onAgentEvent.sh').fsPath;
+	return FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/updateDimHook.sh').fsPath;
 }
 
 /**
- * Build the unconditional Dim `PreToolUse` hook matcher. Fires the bundled
- * {@link dimHookScriptPath} shell script on every tool-use event of every
- * Claude session and routes its output to {@link log} so it is visible in the
- * Dim Claude log channel. Baked into {@link buildOptions} so it applies in
+ * Runtime context the Dim agent hook needs to record per-file `.dim` changes.
+ */
+export interface IDimHookContext {
+	/** Workspace root the hook runs in, so its `git` sees the project repo. */
+	readonly workspaceDir?: string;
+	/** Directory the hook writes per-file `.dim` change records under. */
+	readonly dimStorageDir?: string;
+}
+
+/**
+ * Build the unconditional Dim `Stop` hook matcher. Fires the bundled
+ * {@link dimHookScriptPath} shell script once when a Claude session finishes a
+ * turn, so it can record a `.dim` change record for each file updated during
+ * the turn, and routes the script's output to {@link log} so it is visible in
+ * the Dim Claude log channel. Baked into {@link buildOptions} so it applies in
  * every Dim build regardless of the opened workspace.
  */
-export function dimDefaultHookGroup(log: (data: string) => void): HookCallbackMatcher {
+export function dimDefaultHookGroup(log: (data: string) => void, context: IDimHookContext = {}): HookCallbackMatcher {
 	const scriptPath = dimHookScriptPath();
 	return {
 		hooks: [async () => {
 			await new Promise<void>(resolve => {
-				const child = spawn('/bin/sh', [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+				const env = context.dimStorageDir ? { ...process.env, DIM_DIM_DIR: context.dimStorageDir } : process.env;
+				const child = spawn('/bin/sh', [scriptPath], { cwd: context.workspaceDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
 				child.stdout?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));
 				child.stderr?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));
 				child.on('close', () => resolve());

@@ -6,7 +6,7 @@ Where Dim (this VS Code fork) stores project-related files, and how to persist o
 - [ ] check for changes since last commit and make sure diagrams are up to date based on the files changed
 - [ ] when the user pulls chekc if any diagrams exist for the files cahnge and if so make sure to update them based on the changse
 - [ ] clickable diagrams control+f for flow diagram for a function, just clicking on the function shows the code. Clicking on a box should show the microservice or open the class file?
-- [ ]
+- [ ] on clicking on a file it should open the file.dim file.
 
 ## Product naming (from `product.json`)
 

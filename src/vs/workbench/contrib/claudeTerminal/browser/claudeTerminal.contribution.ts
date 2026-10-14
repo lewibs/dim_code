@@ -25,6 +25,8 @@ import { TerminalLocation } from '../../../../platform/terminal/common/terminal.
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { dimHookStorageDir } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { ViewPane, IViewPaneOptions } from '../../../browser/parts/views/viewPane.js';
 import { ViewPaneContainer } from '../../../browser/parts/views/viewPaneContainer.js';
 import { IViewContainersRegistry, IViewDescriptor, IViewDescriptorService, IViewsRegistry, ViewContainer, ViewContainerLocation, Extensions as ViewExtensions } from '../../../common/views.js';
@@ -71,6 +73,7 @@ class ClaudeTerminalViewPane extends ViewPane {
 		@IFileService private readonly _fileService: IFileService,
 		@IEnvironmentService private readonly _environmentService: IEnvironmentService,
 		@ILogService private readonly _logService: ILogService,
+		@IWorkspaceContextService private readonly _contextService: IWorkspaceContextService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 	}
@@ -160,6 +163,14 @@ class ClaudeTerminalViewPane extends ViewPane {
 				version: '0.0.0',
 				skills: ['./skills/']
 			};
+			// Per-file `.dim` change records go to the workspace-storage bucket for
+			// the open folder (kept out of the repo), matching where Dim's native
+			// agent sessions write them. Omitted when no folder is open.
+			const workspaceFolder = this._contextService.getWorkspace().folders.at(0)?.uri;
+			const dimStorageDir = workspaceFolder ? dimHookStorageDir(this._environmentService.workspaceStorageHome, workspaceFolder).fsPath : undefined;
+			const hookCommand = dimStorageDir
+				? `DIM_DIM_DIR="${dimStorageDir}" sh "\${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"`
+				: 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"';
 			const hooks = {
 				description: 'Dim built-in hooks',
 				hooks: {
@@ -167,7 +178,7 @@ class ClaudeTerminalViewPane extends ViewPane {
 					// rather than before every tool call.
 					Stop: [{
 						matcher: '',
-						hooks: [{ type: 'command', command: 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/onAgentEvent.sh"' }]
+						hooks: [{ type: 'command', command: hookCommand }]
 					}]
 				}
 			};
@@ -176,9 +187,9 @@ class ClaudeTerminalViewPane extends ViewPane {
 
 			// Copy the bundled hook script and skill straight from the build output so
 			// the plugin and Dim's native sessions share a single source of truth.
-			const hookSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/onAgentEvent.sh');
+			const hookSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/updateDimHook.sh');
 			const skillSource = FileAccess.asFileUri('vs/sessions/skills/diagram-writing/SKILL.md');
-			await this._fileService.writeFile(joinPath(hooksDir, 'onAgentEvent.sh'), (await this._fileService.readFile(hookSource)).value);
+			await this._fileService.writeFile(joinPath(hooksDir, 'updateDimHook.sh'), (await this._fileService.readFile(hookSource)).value);
 			await this._fileService.writeFile(joinPath(skillDir, 'SKILL.md'), (await this._fileService.readFile(skillSource)).value);
 
 			return root;

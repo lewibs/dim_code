@@ -99,6 +99,13 @@ export interface IBuildOptionsInput {
 	readonly telemetry?: IAgentHostNativeOTelConfig;
 	readonly traceContext?: IAgentHostTraceContext;
 	readonly getUserPromptAdditionalContext?: () => string | undefined;
+	/**
+	 * Directory the bundled Dim `Stop` hook writes per-file `.dim` change
+	 * records under (see {@link dimDefaultHookGroup}). Resolved by the caller
+	 * from the workspace-storage root so the records stay out of the repo.
+	 * Omitted when no folder is open, in which case the hook records nothing.
+	 */
+	readonly dimHookStorageDir?: URI;
 }
 
 /**
@@ -152,8 +159,13 @@ export async function buildOptions(
 	};
 	const hooks: NonNullable<Options['hooks']> = {};
 	// Dim built-in agent hook: unconditionally runs the bundled workflow script
-	// on every tool-use event, in every build and every workspace.
-	const preToolUseHooks: NonNullable<Options['hooks']>['PreToolUse'] = [dimDefaultHookGroup(logStderr)];
+	// once when the agent finishes a turn, recording a `.dim` change record for
+	// each file updated during the turn. Applies in every build and workspace.
+	hooks.Stop = [dimDefaultHookGroup(logStderr, {
+		workspaceDir: input.workingDirectory.fsPath,
+		dimStorageDir: input.dimHookStorageDir?.fsPath,
+	})];
+	const preToolUseHooks: NonNullable<Options['hooks']>['PreToolUse'] = [];
 	if (input.onPreToolUse) {
 		preToolUseHooks.push({
 			hooks: [async hookInput => {
@@ -162,7 +174,9 @@ export async function buildOptions(
 			}],
 		});
 	}
-	hooks.PreToolUse = preToolUseHooks;
+	if (preToolUseHooks.length > 0) {
+		hooks.PreToolUse = preToolUseHooks;
+	}
 	if (input.getUserPromptAdditionalContext) {
 		hooks.UserPromptSubmit = [{
 			hooks: [async () => ({
