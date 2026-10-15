@@ -53,8 +53,12 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 	/** The open diagram views, keyed by *source file* URI, so the toggle can address them. */
 	private readonly _views = new Map<string, IDimView>();
 
-	/** The diagram type to reveal once a not-yet-open view resolves (set by the toggle). */
-	private readonly _pending = new Map<string, string>();
+	/**
+	 * The diagram type last selected for a source file, kept so a view resolving for the
+	 * first time, or re-resolving after being hidden, shows it instead of the first diagram.
+	 * Set by the toggle; persists for the session (it is not consumed on read).
+	 */
+	private readonly _selected = new Map<string, string>();
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -90,11 +94,16 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			index: 0,
 			render: async () => {
 				view.diagrams = recordUri ? await loadDiagrams(recordUri) : [];
-				view.index = view.diagrams.length > 0 ? Math.max(0, Math.min(view.index, view.diagrams.length - 1)) : 0;
+				// Show the type last selected for this source file (restored across hide/show
+				// and preserved across live re-renders); otherwise keep the current index.
+				const selectedType = this._selected.get(key);
+				const selectedIndex = selectedType ? view.diagrams.findIndex(d => d.type === selectedType) : -1;
+				view.index = selectedIndex >= 0
+					? selectedIndex
+					: (view.diagrams.length > 0 ? Math.max(0, Math.min(view.index, view.diagrams.length - 1)) : 0);
 				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.diagrams, diagramId, view.index);
 			}
 		};
-		view.index = this._initialIndex(key, view.diagrams);
 		this._views.set(key, view);
 
 		// Keep the pan/zoom commands and copy-source working against this webview. The
@@ -129,23 +138,6 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 	}
 
 	/**
-	 * The diagram index a freshly resolved view should show: the one the toggle
-	 * selected before the editor opened (consumed here), else the first diagram.
-	 *
-	 * @param key The source file URI used as the view key.
-	 * @param diagrams The diagrams the view currently holds.
-	 */
-	private _initialIndex(key: string, diagrams: readonly IDimDiagramView[]): number {
-		const pendingType = this._pending.get(key);
-		this._pending.delete(key);
-		if (!pendingType) {
-			return 0;
-		}
-		const index = diagrams.findIndex(d => d.type === pendingType);
-		return index >= 0 ? index : 0;
-	}
-
-	/**
 	 * Reveals the diagram of the given type for a source file. The selection is always
 	 * remembered so that a view resolving (or reopening) shows it in its initial render;
 	 * when a view is already open, it is also switched in place (no reload).
@@ -157,7 +149,7 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 	 * @param type The target diagram type tag.
 	 */
 	private _showDiagram(uri: string, type: string): void {
-		this._pending.set(uri, type);
+		this._selected.set(uri, type);
 		const view = this._views.get(uri);
 		if (view) {
 			const index = view.diagrams.findIndex(d => d.type === type);

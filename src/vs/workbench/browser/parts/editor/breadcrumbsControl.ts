@@ -536,7 +536,6 @@ export class BreadcrumbsControl {
 			// the generic editor type, like Markdown's text/preview picker.
 			const { label: editorTypeLabel, hover: editorTypeHover } = this._createEditorTypeControl();
 			const current = dimOptions.find(option => option.checked) ?? dimOptions[0];
-			console.log('[dim] breadcrumb paint label', { label: current.label, options: dimOptions.map(o => ({ id: o.id, checked: o.checked })) });
 			editorTypeLabel.textContent = current.label;
 			editorTypeHover.update(localize('editorType.hover', "Editor: {0}", current.label));
 		} else {

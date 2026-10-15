@@ -235,7 +235,6 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		const current: string = ref.recordActive
 			? (this._selectedBySource.get(ref.sourceUri.toString()) ?? diagrams[0].type)
 			: 'raw';
-		console.log('[dim] getViewOptions', { key: ref.sourceUri.toString(), recordActive: ref.recordActive, selected: this._selectedBySource.get(ref.sourceUri.toString()), current });
 		// Raw first (the editable source), then one entry per diagram the record holds.
 		const options: IDimDiagramViewOption[] = [{ id: 'raw', label: rawViewTitle(), commandId: RAW_COMMAND_ID, checked: current === 'raw' }];
 		for (const type of dimDiagramTypeOrder) {
@@ -272,7 +271,6 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		}
 		const sourceKey = ref.sourceUri.toString();
 		this._selectedBySource.set(sourceKey, type);
-		console.log('[dim] _showDiagram', { sourceKey, type, recordActive: ref.recordActive });
 
 		if (ref.recordActive) {
 			// The diagram viewer is already showing: switch in place. Refresh the picker's
