@@ -40,7 +40,10 @@ import { IListService, WorkbenchAsyncDataTree, WorkbenchDataTree, WorkbenchListF
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { defaultBreadcrumbsWidgetStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
+import { dimSourceFromRecordUri } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { EditorResourceAccessor, IEditorPartOptions, SideBySideEditor } from '../../../common/editor.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { hiddenEditorTypesSettingId, IEditorResolverService } from '../../../services/editor/common/editorResolverService.js';
 import { ACTIVE_GROUP, ACTIVE_GROUP_TYPE, IEditorService, SIDE_GROUP, SIDE_GROUP_TYPE } from '../../../services/editor/common/editorService.js';
@@ -303,7 +306,9 @@ export class BreadcrumbsControl {
 		@ILabelService private readonly _labelService: ILabelService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IHoverService private readonly _hoverService: IHoverService,
-		@IBreadcrumbsService breadcrumbsService: IBreadcrumbsService
+		@IBreadcrumbsService breadcrumbsService: IBreadcrumbsService,
+		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
+		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService
 	) {
 		this.domNode = document.createElement('div');
 		this.domNode.classList.add('breadcrumbs-control');
@@ -427,7 +432,11 @@ export class BreadcrumbsControl {
 		// honor diff editors and such
 		const canonicalUri = EditorResourceAccessor.getCanonicalUri(this._editorGroup.activeEditor, { supportSideBySide: SideBySideEditor.PRIMARY });
 		const originalUri = EditorResourceAccessor.getOriginalUri(this._editorGroup.activeEditor, { supportSideBySide: SideBySideEditor.PRIMARY });
-		const uri = originalUri ?? canonicalUri;
+		const resourceUri = originalUri ?? canonicalUri;
+		// Dim: the diagram viewer is opened on a hidden `.dim` record under the
+		// storage root. Show the breadcrumbs for the source file it mirrors instead,
+		// so the trail always points at the real file regardless of the active view.
+		const uri = (resourceUri && dimSourceFromRecordUri(this._environmentService.workspaceStorageHome, this._workspaceContextService.getWorkspace().folders.map(folder => folder.uri), resourceUri)) ?? resourceUri;
 		const wasHidden = this.isHidden();
 
 		if (!uri || !this._fileService.hasProvider(uri)) {

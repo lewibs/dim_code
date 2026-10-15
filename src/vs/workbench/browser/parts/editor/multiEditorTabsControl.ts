@@ -39,7 +39,12 @@ import { CONNECTED_EDITOR_TABS_SELECTOR, IEditorGroupMenuIds, IEditorGroupsView,
 import { CloseEditorTabAction, CloseOtherEditorTabsInGroupAction, UnpinEditorAction } from './editorActions.js';
 import { assertReturnsAllDefined, assertReturnsDefined } from '../../../../base/common/types.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
-import { basenameOrAuthority } from '../../../../base/common/resources.js';
+import { basenameOrAuthority, dirname } from '../../../../base/common/resources.js';
+import { URI } from '../../../../base/common/uri.js';
+import { ILabelService } from '../../../../platform/label/common/label.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
+import { dimSourceFromRecordUri } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IPath, win32, posix } from '../../../../base/common/path.js';
@@ -169,6 +174,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		@IEditorResolverService editorResolverService: IEditorResolverService,
 		@IHostService hostService: IHostService,
 		@IMenuService menuService: IMenuService,
+		@ILabelService private readonly labelService: ILabelService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super(parent, editorPartsView, groupsView, groupView, tabsModel, menuIds, breadcrumbsInHeader, useModernUITabs, contextMenuService, instantiationService, contextKeyService, keybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService, menuService);
 
@@ -1590,12 +1598,16 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		const labels: IEditorInputLabel[] = [];
 		let activeEditorTabIndex = -1;
 		this.tabsModel.getEditors(EditorsOrder.SEQUENTIAL).forEach((editor: EditorInput, tabIndex: number) => {
+			// Dim: the diagram viewer is opened on a hidden `.dim` record under the storage
+			// root. Label its tab as the source file it mirrors — name, path and file-type
+			// icon — so switching to a diagram never renames the tab to `<file>.dim`.
+			const dimSource = this.dimSourceResource(editor);
 			labels.push({
 				editor,
-				name: editor.getName(),
-				description: editor.getDescription(verbosity),
+				name: dimSource ? this.labelService.getUriBasenameLabel(dimSource) : editor.getName(),
+				description: dimSource ? this.dimSourceDescription(dimSource, verbosity) : editor.getDescription(verbosity),
 				forceDescription: editor.hasCapability(EditorInputCapabilities.ForceDescription),
-				title: editor.getTitle(Verbosity.LONG),
+				title: dimSource ? this.labelService.getUriLabel(dimSource) : editor.getTitle(Verbosity.LONG),
 				ariaLabel: computeEditorAriaLabel(editor, tabIndex, this.groupView, this.editorPartsView.count)
 			});
 
@@ -1612,6 +1624,28 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Remember for fast lookup
 		this.tabLabels = labels;
 		this.activeTabLabel = labels[activeEditorTabIndex];
+	}
+
+	/**
+	 * The source file an editor's `.dim` diagram record mirrors, or `undefined` when the
+	 * editor is not a Dim record. Used to label the diagram viewer's tab (name, path and
+	 * file-type icon) as the source file rather than the hidden `<file>.dim` record.
+	 */
+	private dimSourceResource(editor: EditorInput): URI | undefined {
+		const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
+		if (!resource) {
+			return undefined;
+		}
+		return dimSourceFromRecordUri(this.environmentService.workspaceStorageHome, this.workspaceContextService.getWorkspace().folders.map(folder => folder.uri), resource);
+	}
+
+	/** The tab description (parent folder) for a Dim record's source file, matching a normal file tab. */
+	private dimSourceDescription(source: URI, verbosity: Verbosity): string | undefined {
+		if (verbosity === Verbosity.SHORT) {
+			return undefined;
+		}
+		const label = this.labelService.getUriLabel(dirname(source), { relative: verbosity === Verbosity.MEDIUM });
+		return label && label !== '.' ? label : undefined;
 	}
 
 	private shortenTabLabels(labels: IEditorInputLabel[]): void {
@@ -1844,8 +1878,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// Label
 		const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
+		// Dim: show the source file's type icon for a diagram viewer tab, not the `.dim` icon.
+		const iconResource = this.dimSourceResource(editor) ?? EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.BOTH });
 		tabLabelWidget.setResource(
-			{ name, description, resource: EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.BOTH }) },
+			{ name, description, resource: iconResource },
 			{
 				title: this.getHoverTitle(editor),
 				extraClasses: coalesce(['tab-label', fileDecorationBadges ? 'tab-label-has-badge' : undefined].concat(editor.getLabelExtraClasses())),

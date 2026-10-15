@@ -27,7 +27,8 @@
   "browser": "./dist/browser/extension",
   "activationEvents": [
     "onWebviewPanel:vscode.mermaid-markdown-features.preview",
-    "onCustomEditor:vscode.mermaid-markdown-features.dimEditor"
+    "onCustomEditor:vscode.mermaid-markdown-features.dimEditor",
+    "onCommand:_dim.showDiagram"
   ],
   "contributes": {
     "customEditors": [

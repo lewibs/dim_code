@@ -36,8 +36,7 @@ import { findGroup } from '../common/editorGroupFinder.js';
 import { ITextEditorService } from '../../textfile/common/textEditorService.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
-import { dimHookRecordUri, dimPlaceholderDiagram, isDimCodeFile } from '../../../../platform/agentHost/common/dimHookStorage.js';
-import { VSBuffer } from '../../../../base/common/buffer.js';
+import { seedDimRecord } from '../../../../platform/agentHost/common/dimHookStorage.js';
 
 export class EditorService extends Disposable implements EditorServiceImpl {
 
@@ -539,50 +538,33 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	 * redirected to, or `undefined` to open the file itself. Every open path in
 	 * the workbench — the explorer, Quick Open (Ctrl+P), Go to File,
 	 * drag-and-drop — funnels an untyped resource input through
-	 * {@link openEditor}/{@link openEditors}, so swapping the resource at those
-	 * two call sites redirects them all with a single seam.
+	 * {@link openEditor}/{@link openEditors}, so seeding at those two call sites
+	 * covers them all with a single seam.
 	 *
-	 * The record is created on first open when it does not exist yet, seeded with
-	 * a placeholder diagram, so every workspace file resolves to a record; the
-	 * `.dim` custom editor renders the record's contents as a mermaid diagram.
+	 * The file itself still opens as a normal editor (so it stays editable, with
+	 * full language and extension support); the record is seeded in the background
+	 * so that every source file has one, and the native Dim view toggle in the
+	 * editor title bar can offer its diagrams. The `.dim` custom editor renders the
+	 * record's contents as a mermaid diagram when that toggle switches to it.
 	 *
-	 * Returns `undefined` whenever there is no record to show: the open is not a
-	 * plain resource input (diff, merge or an already-typed input), the file is
-	 * not a source-code file, it is not part of the open workspace, or it is
-	 * itself a record under the storage root (guarding against a redirect loop).
-	 * Those opens still show themselves.
+	 * No-ops whenever there is no record to seed: the open is not a plain resource
+	 * input (diff, merge or an already-typed input), the file is not a source-code
+	 * file, it is not part of the open workspace, or it is itself a record under the
+	 * storage root (guarding against seeding a record for a record).
 	 */
-	private async dimRecordFor(editor: EditorInput | IUntypedEditorInput): Promise<URI | undefined> {
+	private async ensureDimRecord(editor: EditorInput | IUntypedEditorInput): Promise<void> {
 		if (!isResourceEditorInput(editor)) {
-			return undefined;
+			return;
 		}
 
-		const resource = editor.resource;
-		if (!isDimCodeFile(resource)) {
-			return undefined; // only source-code files get a record
-		}
-
-		const storageHome = this.environmentService.workspaceStorageHome;
-		if (this.uriIdentityService.extUri.isEqualOrParent(resource, storageHome)) {
-			return undefined; // already a record: never redirect onto ourselves
-		}
-
-		const folder = this.contextService.getWorkspaceFolder(resource);
+		const folder = this.contextService.getWorkspaceFolder(editor.resource);
 		if (!folder) {
-			return undefined;
+			return;
 		}
 
-		const record = dimHookRecordUri(storageHome, folder.uri, resource);
-		if (!record) {
-			return undefined;
-		}
-
-		if (!(await this.fileService.exists(record))) {
-			// Seed a dummy diagram; the `.dim` editor renders the content as mermaid.
-			await this.fileService.createFile(record, VSBuffer.fromString(dimPlaceholderDiagram));
-		}
-
-		return record;
+		// Seed the file's `.dim` change record (a placeholder when the hook has not
+		// written one yet); the `.dim` editor renders its diagrams as mermaid.
+		await seedDimRecord(this.fileService, this.environmentService.workspaceStorageHome, folder.uri, editor.resource);
 	}
 
 	//#endregion
@@ -597,11 +579,9 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	openEditor(editor: IResourceDiffEditorInput, group?: PreferredGroup): Promise<ITextDiffEditorPane | undefined>;
 	openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined>;
 	async openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined> {
-		// Dim: open the file's `.dim` change record when one exists
-		const dimRecord = await this.dimRecordFor(editor);
-		if (dimRecord && isResourceEditorInput(editor)) {
-			editor = { ...editor, resource: dimRecord };
-		}
+		// Dim: seed the file's `.dim` change record so the title-bar view toggle can
+		// offer its diagrams; the file itself still opens as a normal editor.
+		await this.ensureDimRecord(editor);
 
 		let typedEditor: EditorInput | undefined = undefined;
 		let options = isEditorInput(editor) ? optionsOrPreferredGroup as IEditorOptions : editor.options;
@@ -682,13 +662,11 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 
 		// Find target groups for editors to open
 		const mapGroupToTypedEditors = new Map<IEditorGroup, Array<EditorInputWithOptions>>();
-		for (let editor of editors) {
-			// Dim: open each file's `.dim` change record when one exists
+		for (const editor of editors) {
+			// Dim: seed each file's `.dim` change record so the title-bar view toggle
+			// can offer its diagrams; the file itself still opens as a normal editor.
 			if (!isEditorInputWithOptions(editor)) {
-				const dimRecord = await this.dimRecordFor(editor);
-				if (dimRecord && isResourceEditorInput(editor)) {
-					editor = { ...editor, resource: dimRecord };
-				}
+				await this.ensureDimRecord(editor);
 			}
 
 			let typedEditor: EditorInputWithOptions | undefined = undefined;

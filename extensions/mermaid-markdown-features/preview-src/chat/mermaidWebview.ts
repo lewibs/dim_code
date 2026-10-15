@@ -380,7 +380,9 @@ export class PanZoomHandler {
  * Unpersisted state
  */
 interface LocalState {
-	readonly mermaidSource: string;
+	// Mutable: the diagram toggle updates this so a later theme-change re-render
+	// reuses the currently selected diagram's source.
+	mermaidSource: string;
 }
 
 interface PersistedState {
@@ -403,6 +405,25 @@ async function rerenderMermaidDiagram(
 	await mermaid.run({
 		nodes: [diagramElement]
 	});
+}
+
+/**
+ * Reads the record's diagrams from the `#dim-diagrams` JSON data block embedded in
+ * the webview HTML. The native Dim view toggle (in the editor title bar) switches
+ * between these by index via a `dimSelectDiagram` message. Returns an empty array
+ * when the block is absent or malformed.
+ */
+function readDimDiagrams(): Array<{ mermaid: string }> {
+	const dataElement = document.getElementById('dim-diagrams');
+	if (!dataElement) {
+		return [];
+	}
+	try {
+		const parsed = JSON.parse(dataElement.textContent ?? '[]');
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
 }
 
 export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZoomOptions): Promise<PanZoomHandler | undefined> {
@@ -459,11 +480,45 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	const panZoomHandler = new PanZoomHandler(wrapper, content, vscode, options);
 	panZoomHandler.initialize();
 
+	// Serialize re-renders. `mermaid.run` mutates the diagram node in place and is
+	// not safe to run concurrently, so overlapping requests — rapid toggle clicks,
+	// or a theme change landing mid-switch — would race and leave the wrong diagram
+	// shown. Chain renders and coalesce to the most recently requested source so
+	// only the latest wins.
+	let renderChain: Promise<void> = Promise.resolve();
+	let latestSource = state.mermaidSource;
+	const requestRender = (source: string): Promise<void> => {
+		latestSource = source;
+		renderChain = renderChain.then(async () => {
+			if (latestSource !== source) {
+				return; // a newer request superseded this one
+			}
+			await rerenderMermaidDiagram(diagram, source, themeTracker);
+		}).catch(() => { /* keep the chain alive so later renders still run */ });
+		return renderChain;
+	};
+
 	// Listen for messages from the extension
-	window.addEventListener('message', event => {
+	window.addEventListener('message', async event => {
 		const message = event.data;
 		if (message.type === 'resetPanZoom') {
 			panZoomHandler.reset();
+			return;
+		}
+		// The native Dim view toggle asks to show a different diagram from the
+		// record: swap the rendered mermaid source in place and reset pan/zoom.
+		if (message.type === 'dimSelectDiagram') {
+			const selected = readDimDiagrams()[message.index];
+			if (!selected || typeof selected.mermaid !== 'string') {
+				return;
+			}
+			state.mermaidSource = selected.mermaid;
+			await requestRender(selected.mermaid);
+			// Only reset the view if this is still the diagram that is showing, so a
+			// superseded switch does not clobber the latest selection's pan/zoom.
+			if (state.mermaidSource === selected.mermaid) {
+				panZoomHandler.reset();
+			}
 		}
 	});
 
@@ -472,11 +527,7 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	// from `workbench.colorCustomizations`), and only fires when the resolved colors actually
 	// change.
 	themeTracker.onDidChange(() => {
-		const diagramNode = document.querySelector('.mermaid');
-		if (!(diagramNode instanceof HTMLElement)) {
-			return;
-		}
-		rerenderMermaidDiagram(diagramNode, state.mermaidSource, themeTracker);
+		requestRender(state.mermaidSource);
 	});
 	themeTracker.observeDomChanges();
 

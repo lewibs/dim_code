@@ -3,9 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { VSBuffer } from '../../../base/common/buffer.js';
 import { stringHash } from '../../../base/common/hash.js';
-import { extname, joinPath, relativePath } from '../../../base/common/resources.js';
+import { extname, extUri, joinPath, relativePath } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
+import { IFileService } from '../../files/common/files.js';
+import { DimDiagramType, dimDiagramLabel, inferDimDiagramType } from './dimDiagramTypes.js';
 
 /**
  * File extensions (lower-case, without the leading dot) that Dim treats as
@@ -28,12 +31,116 @@ const dimCodeExtensions = new Set<string>([
 ]);
 
 /**
- * Placeholder contents written into a freshly created `.dim` record. A `.dim`
- * file is rendered as a mermaid diagram (its whole content is the diagram
- * source), so a new record seeds a dummy UML class diagram until the agent fills
- * it in. Mirrored by the `updateDimHook.sh` agent hook; keep the two in sync.
+ * One diagram stored inside a `.dim` record: its {@link DimDiagramType}, a short
+ * UI label for the viewer's toggle button, and the mermaid source to render.
  */
-export const dimPlaceholderDiagram = `classDiagram
+export interface IDimDiagram {
+	readonly type: DimDiagramType;
+	readonly label: string;
+	readonly mermaid: string;
+}
+
+/**
+ * The on-disk shape of a `.dim` record: a small JSON container holding one or
+ * more diagrams, so a single file can offer several views (structure, behavior,
+ * …) that the viewer exposes as a toggle button group.
+ */
+export interface IDimRecord {
+	readonly version: number;
+	/**
+	 * Workspace-relative path of the source file this record describes (e.g.
+	 * `src/foo.ts` for `src/foo.ts.dim`). Lets the viewer offer a "Raw" view of
+	 * the associated file. Optional so legacy records keep parsing.
+	 */
+	readonly source?: string;
+	readonly diagrams: readonly IDimDiagram[];
+}
+
+/** Current `.dim` record format version. Bump when the JSON shape changes. */
+export const DIM_RECORD_VERSION = 1;
+
+/**
+ * The view type the `mermaid-markdown-features` extension registers its `.dim`
+ * custom editor under. Duplicated from `dimEditorViewType` in that extension,
+ * which cannot import platform sources; keep the two in sync. Used to force a
+ * `.dim` record open with the diagram viewer rather than a plain text editor.
+ */
+export const DIM_EDITOR_VIEW_TYPE = 'vscode.mermaid-markdown-features.dimEditor';
+
+/**
+ * Parses the contents of a `.dim` file into its list of diagrams. Accepts both
+ * the JSON {@link IDimRecord} container and a legacy record whose entire content
+ * is a single block of raw mermaid source (which becomes a one-diagram list, its
+ * type inferred from the opening keyword), so older records keep rendering.
+ *
+ * @param content The raw text of the `.dim` file.
+ */
+export function parseDimRecord(content: string): IDimDiagram[] {
+	const trimmed = content.trimStart();
+	if (trimmed.startsWith('{')) {
+		try {
+			const parsed = JSON.parse(content) as Partial<IDimRecord>;
+			if (parsed && Array.isArray(parsed.diagrams)) {
+				return parsed.diagrams
+					.filter(d => d && typeof d.mermaid === 'string')
+					.map(d => {
+						const type = (d.type as DimDiagramType) ?? inferDimDiagramType(d.mermaid);
+						return { type, label: d.label || dimDiagramLabel(type), mermaid: d.mermaid };
+					});
+			}
+		} catch {
+			// Not valid JSON; fall through and treat the whole file as raw mermaid.
+		}
+	}
+	const type = inferDimDiagramType(content);
+	return [{ type, label: dimDiagramLabel(type), mermaid: content }];
+}
+
+/**
+ * Extracts the workspace-relative `source` path recorded in a `.dim` file's JSON
+ * container, or `undefined` for a legacy raw-mermaid record or one that stored no
+ * source. Lets a caller map a `.dim` record back to the file it describes (e.g. to
+ * offer a "Raw" view of that file).
+ *
+ * @param content The raw text of the `.dim` file.
+ */
+export function parseDimRecordSource(content: string): string | undefined {
+	const trimmed = content.trimStart();
+	if (!trimmed.startsWith('{')) {
+		return undefined;
+	}
+	try {
+		const parsed = JSON.parse(content) as Partial<IDimRecord>;
+		return typeof parsed.source === 'string' ? parsed.source : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Serializes a list of diagrams into the JSON {@link IDimRecord} text written to a
+ * `.dim` file.
+ *
+ * @param diagrams The diagrams to store.
+ * @param source Workspace-relative path of the source file the record describes,
+ * recorded so the viewer can offer a "Raw" view of it. Omitted when unknown.
+ */
+export function serializeDimRecord(diagrams: readonly IDimDiagram[], source?: string): string {
+	const record: IDimRecord = { version: DIM_RECORD_VERSION, source, diagrams };
+	return JSON.stringify(record, undefined, '\t');
+}
+
+/**
+ * Placeholder diagrams seeded into a freshly created `.dim` record until the agent
+ * fills them in: a structural view and a behavioral view, so the viewer shows its
+ * toggle group out of the box. Mirrored by the `updateDimHook.sh` agent hook;
+ * keep the two in sync.
+ */
+export const dimPlaceholderDiagrams: readonly IDimDiagram[] = [
+	{
+		type: DimDiagramType.Class,
+		label: dimDiagramLabel(DimDiagramType.Class),
+		mermaid: `classDiagram
 	class Example {
 		+String name
 		+doWork() void
@@ -42,7 +149,26 @@ export const dimPlaceholderDiagram = `classDiagram
 		+assist() void
 	}
 	Example --> Helper : uses
-`;
+`,
+	},
+	{
+		type: DimDiagramType.Sequence,
+		label: dimDiagramLabel(DimDiagramType.Sequence),
+		mermaid: `sequenceDiagram
+	participant Example
+	participant Helper
+	Example->>Helper: assist()
+	Helper-->>Example: result
+`,
+	},
+];
+
+/**
+ * The serialized {@link IDimRecord} text seeded into a freshly created `.dim`
+ * record. Written by the editor when it redirects a file open to a missing
+ * record; mirrored by the `updateDimHook.sh` agent hook.
+ */
+export const dimPlaceholderRecordContent = serializeDimRecord(dimPlaceholderDiagrams);
 
 /**
  * Whether a file is a source-code file that Dim should give a `.dim` change
@@ -96,4 +222,72 @@ export function dimHookRecordUri(workspaceStorageHome: URI, workspaceFolder: URI
 		return undefined; // the file is outside the workspace folder
 	}
 	return joinPath(dimHookStorageDir(workspaceStorageHome, workspaceFolder), `${relative}.dim`);
+}
+
+/**
+ * Resolves the source file a `.dim` change record describes, reversing
+ * {@link dimHookRecordUri}: given a record under {@link dimHookStorageDir} for one
+ * of the open workspace folders, returns the workspace file it mirrors. Returns
+ * `undefined` when the URI is not a `.dim` record under any of those folders'
+ * storage directories.
+ *
+ * This lets the diagram viewer present itself as its source file (tab, breadcrumbs)
+ * even though the editor is opened on the hidden record under the storage root.
+ *
+ * @param workspaceStorageHome The `workspaceStorageHome` from the environment service.
+ * @param workspaceFolders The opened workspace folders to resolve against.
+ * @param record The `.dim` record URI to map back to its source file.
+ */
+export function dimSourceFromRecordUri(workspaceStorageHome: URI, workspaceFolders: readonly URI[], record: URI): URI | undefined {
+	if (!record.path.endsWith('.dim')) {
+		return undefined;
+	}
+	for (const folder of workspaceFolders) {
+		const relative = relativePath(dimHookStorageDir(workspaceStorageHome, folder), record);
+		if (relative === undefined || relative.length === 0 || relative.startsWith('..')) {
+			continue; // not under this folder's record directory
+		}
+		return joinPath(folder, relative.slice(0, -'.dim'.length));
+	}
+	return undefined;
+}
+
+/**
+ * Ensures the `.dim` change record for a source file exists, seeding a placeholder
+ * record (so the diagram view toggle has something to offer) when neither the agent
+ * hook nor a previous call has written one yet. Idempotent: a record that already
+ * exists is left untouched, and a losing race to create one is ignored.
+ *
+ * Returns the record URI, or `undefined` when the file gets no record: it is not a
+ * source-code file, it lives outside the workspace folder, or it is itself a record
+ * under the storage root. Shared by the editor-open seeding and the view toggle so
+ * that a restored editor on window load also gets its record, not only a fresh open.
+ *
+ * @param fileService The file service used to probe for and create the record.
+ * @param workspaceStorageHome The `workspaceStorageHome` from the environment service.
+ * @param workspaceFolder The workspace folder the file belongs to.
+ * @param file The workspace source file whose record should be ensured.
+ */
+export async function seedDimRecord(fileService: IFileService, workspaceStorageHome: URI, workspaceFolder: URI, file: URI): Promise<URI | undefined> {
+	if (!isDimCodeFile(file)) {
+		return undefined; // only source-code files get a record
+	}
+	if (extUri.isEqualOrParent(file, workspaceStorageHome)) {
+		return undefined; // already under the storage root: never seed a record for a record
+	}
+	const record = dimHookRecordUri(workspaceStorageHome, workspaceFolder, file);
+	if (!record) {
+		return undefined; // the file is outside the workspace folder
+	}
+	if (!(await fileService.exists(record))) {
+		// Record the file's workspace-relative path so the viewer can map the record
+		// back to its source file (and offer a "Raw" view of it).
+		const source = relativePath(workspaceFolder, file);
+		try {
+			await fileService.createFile(record, VSBuffer.fromString(serializeDimRecord(dimPlaceholderDiagrams, source)));
+		} catch {
+			// A concurrent seed may have created it first; the record now exists either way.
+		}
+	}
+	return record;
 }

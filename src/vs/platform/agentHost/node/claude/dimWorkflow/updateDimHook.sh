@@ -60,19 +60,30 @@ echo "$changed" | while IFS= read -r line; do
 	target="$DIM_DIM_DIR/$path.dim"
 	mkdir -p "$(dirname "$target")"
 
-	# Seed a dummy UML diagram; a `.dim` file is rendered as a mermaid diagram.
-	# This mirrors `dimPlaceholderDiagram` in dimHookStorage.ts; keep them in sync.
-	cat > "$target" <<'DIM_PLACEHOLDER'
-classDiagram
-	class Example {
-		+String name
-		+doWork() void
-	}
-	class Helper {
-		+assist() void
-	}
-	Example --> Helper : uses
-DIM_PLACEHOLDER
+	# Seed a dummy record; a `.dim` file is a JSON container of mermaid diagrams
+	# that the editor renders with a toggle group. The "source" field is the
+	# file's workspace-relative path, so the viewer can offer a "Raw" view of it.
+	# This mirrors `serializeDimRecord(dimPlaceholderDiagrams, …)` in
+	# dimHookStorage.ts; keep them in sync. The heredoc is unquoted so "$path"
+	# expands; the diagram bodies below contain no shell-special characters.
+	cat > "$target" <<DIM_RECORD
+{
+	"version": 1,
+	"source": "$path",
+	"diagrams": [
+		{
+			"type": "classDiagram",
+			"label": "Structure",
+			"mermaid": "classDiagram\n\tclass Example {\n\t\t+String name\n\t\t+doWork() void\n\t}\n\tclass Helper {\n\t\t+assist() void\n\t}\n\tExample --> Helper : uses\n"
+		},
+		{
+			"type": "sequenceDiagram",
+			"label": "Behavior",
+			"mermaid": "sequenceDiagram\n\tparticipant Example\n\tparticipant Helper\n\tExample->>Helper: assist()\n\tHelper-->>Example: result\n"
+		}
+	]
+}
+DIM_RECORD
 
 	echo "Wrote $target"
 done

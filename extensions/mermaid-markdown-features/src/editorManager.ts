@@ -8,6 +8,7 @@ import { MermaidWebviewManager } from './webviewManager';
 import { escapeHtmlText } from './util/html';
 import { Disposable } from './util/dispose';
 import { renderMermaidConfigSpan } from './markdownMermaid/config';
+import { IDimDiagramView } from './dimRecord';
 
 export const mermaidEditorViewType = 'vscode.mermaid-markdown-features.preview';
 
@@ -203,22 +204,26 @@ class MermaidPreview extends Disposable {
 	}
 
 	private _getHtml(): string {
-		return getMermaidEditorHtml(this._webviewPanel.webview, this._extensionUri, this._mermaidSource, this.diagramId);
+		const diagrams: IDimDiagramView[] = [{ type: '', label: '', mermaid: this._mermaidSource }];
+		return getMermaidEditorHtml(this._webviewPanel.webview, this._extensionUri, diagrams, this.diagramId);
 	}
 }
 
 /**
  * Builds the full-viewport mermaid webview HTML shared by the diagram preview
- * panel and the `.dim` custom editor. The diagram source is embedded in the
- * `.mermaid` element and rendered by the `index-editor` webview script, which
- * also wires up the pan/zoom controls.
+ * panel and the `.dim` custom editor. The selected diagram's source is embedded in
+ * the `.mermaid` element and rendered by the `index-editor` webview script, which
+ * also wires up the pan/zoom controls. All of the record's diagrams are embedded as
+ * JSON so the native Dim view toggle can switch between them in place (via a
+ * `dimSelectDiagram` message) without reloading the webview.
  *
  * @param webview The webview the HTML is rendered into (for resource URIs and CSP).
  * @param extensionUri The extension root, used to resolve the webview bundle.
- * @param mermaidSource The mermaid diagram source to render.
+ * @param diagrams The diagrams held by the record.
  * @param diagramId The id used to address this webview for pan/zoom commands.
+ * @param initialIndex The index of the diagram to show first (clamped to range).
  */
-export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, mermaidSource: string, diagramId: string): string {
+export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, diagrams: readonly IDimDiagramView[], diagramId: string, initialIndex: number = 0): string {
 	const nonce = generateUuid();
 
 	const mediaRoot = vscode.Uri.joinPath(extensionUri, 'chat-webview-out');
@@ -228,6 +233,17 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 	const zoomOutLabel = vscode.l10n.t('Zoom Out');
 	const zoomInLabel = vscode.l10n.t('Zoom In');
 	const resetPanZoomLabel = vscode.l10n.t('Reset Pan and Zoom');
+
+	const index = diagrams.length > 0 ? Math.max(0, Math.min(initialIndex, diagrams.length - 1)) : 0;
+	const mermaidSource = diagrams[index]?.mermaid ?? '';
+
+	// All diagram sources, embedded as JSON data so the native toggle can swap the
+	// rendered diagram in place. `type="application/json"` is a data block (not
+	// executed), and `<`/`>`/`&` are escaped so the payload cannot break out of the
+	// script element.
+	const diagramData = diagrams.length > 0
+		? `<script type="application/json" id="dim-diagrams" nonce="${nonce}">${JSON.stringify(diagrams.map(d => ({ label: d.label, mermaid: d.mermaid }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
+		: '';
 
 	return /* html */`<!DOCTYPE html>
 		<html lang="en">
@@ -290,6 +306,7 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 		</head>
 		<body data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
 			${renderMermaidConfigSpan()}
+			${diagramData}
 			<div class="zoom-controls">
 				<button class="pan-mode-btn" title="${togglePanModeLabel}" aria-label="${togglePanModeLabel}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i></button>
 				<button class="zoom-out-btn" title="${zoomOutLabel}" aria-label="${zoomOutLabel}"><i class="codicon codicon-zoom-out" aria-hidden="true"></i></button>

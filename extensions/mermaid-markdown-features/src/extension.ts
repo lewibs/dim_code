@@ -20,10 +20,14 @@ export function activate(context: vscode.ExtensionContext) {
 	// Register chat support
 	context.subscriptions.push(registerChatSupport(context, webviewManager, editorManager));
 
-	// Register the Dim diagram editor so `.dim` files auto-render as mermaid.
+	// Register the Dim diagram editor so `.dim` files auto-render as mermaid. The
+	// provider also registers the `_dim.showDiagram` command the native view toggle
+	// uses, so hold onto it for disposal.
+	const dimEditorProvider = new DimEditorProvider(context.extensionUri, webviewManager);
+	context.subscriptions.push(dimEditorProvider);
 	context.subscriptions.push(vscode.window.registerCustomEditorProvider(
 		dimEditorViewType,
-		new DimEditorProvider(context.extensionUri, webviewManager),
+		dimEditorProvider,
 		{
 			webviewOptions: { retainContextWhenHidden: false },
 			supportsMultipleEditorsPerDocument: true

@@ -484,4 +484,7 @@ import './contrib/editTelemetry/browser/editTelemetry.contribution.js';
 // Opener
 import './contrib/opener/browser/opener.contribution.js';
 
+// Dim
+import './contrib/dim/browser/dim.contribution.js';
+
 //#endregion
