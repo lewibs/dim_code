@@ -28,7 +28,8 @@
   "activationEvents": [
     "onWebviewPanel:vscode.mermaid-markdown-features.preview",
     "onCustomEditor:vscode.mermaid-markdown-features.dimEditor",
-    "onCommand:_dim.showDiagram"
+    "onCommand:_dim.showDiagram",
+    "onCommand:_dim.generateRecord"
   ],
   "contributes": {
     "customEditors": [

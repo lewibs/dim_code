@@ -53,6 +53,14 @@ export interface IDimRecord {
 	 * the associated file. Optional so legacy records keep parsing.
 	 */
 	readonly source?: string;
+	/**
+	 * Content hash of the source file at the time the diagrams were generated, used
+	 * by the `generateDimDiagram.sh` generator to skip a file whose code is unchanged.
+	 * Written only by that generator (the editor's placeholder seed omits it, so a
+	 * seeded record is always treated as stale and regenerated). Optional so seeded and
+	 * legacy records keep parsing.
+	 */
+	readonly sourceHash?: string;
 	readonly diagrams: readonly IDimDiagram[];
 }
 

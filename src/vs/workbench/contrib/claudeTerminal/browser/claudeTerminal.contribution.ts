@@ -185,11 +185,15 @@ class ClaudeTerminalViewPane extends ViewPane {
 			await this._fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
 			await this._fileService.writeFile(joinPath(hooksDir, 'hooks.json'), VSBuffer.fromString(JSON.stringify(hooks, null, '\t')));
 
-			// Copy the bundled hook script and skill straight from the build output so
-			// the plugin and Dim's native sessions share a single source of truth.
+			// Copy the bundled hook script, its per-file diagram generator and the skill
+			// straight from the build output so the plugin and Dim's native sessions
+			// share a single source of truth. updateDimHook.sh resolves the generator
+			// relative to itself, so both must land in the same hooks folder.
 			const hookSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/updateDimHook.sh');
+			const generatorSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/generateDimDiagram.sh');
 			const skillSource = FileAccess.asFileUri('vs/sessions/skills/diagram-writing/SKILL.md');
 			await this._fileService.writeFile(joinPath(hooksDir, 'updateDimHook.sh'), (await this._fileService.readFile(hookSource)).value);
+			await this._fileService.writeFile(joinPath(hooksDir, 'generateDimDiagram.sh'), (await this._fileService.readFile(generatorSource)).value);
 			await this._fileService.writeFile(joinPath(skillDir, 'SKILL.md'), (await this._fileService.readFile(skillSource)).value);
 
 			return root;

@@ -4,14 +4,20 @@
 #  Licensed under the MIT License. See License.txt in the project root for license information.
 # ---------------------------------------------------------------------------------------------
 # Dim built-in agent hook. Runs once when the agent finishes a turn (Stop) and,
-# for every file changed in the workspace since the last commit, ensures an empty
-# companion "<file>.dim" record exists.
+# for every code file changed in the workspace since the last commit, (re)generates
+# its companion "<file>.dim" diagram record. The diagram kind is chosen per file by
+# generateDimDiagram.sh (the single generation step this hook shares with the
+# editor's file-open path), not hard-coded here.
 #
 # Inputs (set by the caller):
 #   cwd          - the workspace root, so git sees the project repository
 #   DIM_DIM_DIR  - directory the ".dim" records are written under (kept out of
 #                  the repo). Records mirror the repo-relative path of each
 #                  changed file with a ".dim" suffix: src/foo.ts -> $DIM_DIM_DIR/src/foo.ts.dim
+
+# The shared per-file generator sits next to this script (in the bundled build and
+# in the materialized CLI-terminal plugin, both scripts live in the same folder).
+generator="$(dirname "$0")/generateDimDiagram.sh"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	echo "Not a git repository; skipping .dim update."
@@ -23,7 +29,12 @@ if [ -z "$DIM_DIM_DIR" ]; then
 	exit 0
 fi
 
-changed=$(git status --porcelain)
+root=$(pwd)
+
+# `--untracked-files=all` lists each new file individually; without it git collapses
+# a wholly-untracked directory to a single entry (e.g. "src/") and its files would
+# never be recorded.
+changed=$(git status --porcelain --untracked-files=all)
 if [ -z "$changed" ]; then
 	echo "No files changed since last commit; nothing to record."
 	exit 0
@@ -57,33 +68,7 @@ echo "$changed" | while IFS= read -r line; do
 		*) continue ;;
 	esac
 
-	target="$DIM_DIM_DIR/$path.dim"
-	mkdir -p "$(dirname "$target")"
-
-	# Seed a dummy record; a `.dim` file is a JSON container of mermaid diagrams
-	# that the editor renders with a toggle group. The "source" field is the
-	# file's workspace-relative path, so the viewer can offer a "Raw" view of it.
-	# This mirrors `serializeDimRecord(dimPlaceholderDiagrams, …)` in
-	# dimHookStorage.ts; keep them in sync. The heredoc is unquoted so "$path"
-	# expands; the diagram bodies below contain no shell-special characters.
-	cat > "$target" <<DIM_RECORD
-{
-	"version": 1,
-	"source": "$path",
-	"diagrams": [
-		{
-			"type": "classDiagram",
-			"label": "Structure",
-			"mermaid": "classDiagram\n\tclass Example {\n\t\t+String name\n\t\t+doWork() void\n\t}\n\tclass Helper {\n\t\t+assist() void\n\t}\n\tExample --> Helper : uses\n"
-		},
-		{
-			"type": "sequenceDiagram",
-			"label": "Behavior",
-			"mermaid": "sequenceDiagram\n\tparticipant Example\n\tparticipant Helper\n\tExample->>Helper: assist()\n\tHelper-->>Example: result\n"
-		}
-	]
-}
-DIM_RECORD
-
-	echo "Wrote $target"
+	# Delegate to the shared generator, which picks the best-fit diagram type for
+	# this file's code and (re)writes the record only when the source has changed.
+	"$generator" "$root/$path" "$DIM_DIM_DIR/$path.dim" "$path"
 done

@@ -5,6 +5,8 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { FileAccess } from '../../../../base/common/network.js';
+import { relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { DimDiagramType, dimDiagramCatalog } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
@@ -34,6 +36,23 @@ const SHOW_DIAGRAM_COMMAND = '_dim.showDiagram';
  * path mapping needs platform-only hashing the extension cannot import.
  */
 const RESOLVE_RECORD_COMMAND = '_dim.resolveRecord';
+
+/**
+ * Command the `mermaid-markdown-features` extension registers to (re)generate a
+ * source file's `.dim` record, picking the diagram type that fits its code. Fired
+ * here on file open (after seeding the placeholder) so a file whose record is
+ * missing or stale is brought up to date. It runs in the extension host because
+ * generation shells out to a child process the workbench renderer cannot spawn;
+ * the generator itself no-ops when the record is already current.
+ */
+const GENERATE_RECORD_COMMAND = '_dim.generateRecord';
+
+/**
+ * Absolute URI of the bundled per-file diagram generator, handed to
+ * {@link GENERATE_RECORD_COMMAND} so the extension host spawns the same script the
+ * agent hook uses.
+ */
+const DIM_GENERATOR_URI = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/generateDimDiagram.sh');
 
 /** The diagram types in the order they appear in the view picker. */
 const dimDiagramTypeOrder = Object.keys(dimDiagramCatalog) as DimDiagramType[];
@@ -102,6 +121,13 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	/** Guards against out-of-order async updates when the active editor changes quickly. */
 	private _updateSeq = 0;
 
+	/**
+	 * Source files whose `.dim` record is currently being (re)generated, keyed by source
+	 * URI, so a burst of resolves for the same file while generation is in flight only
+	 * spawns one generator run. The generator itself is the real freshness gate.
+	 */
+	private readonly _generating = new Set<string>();
+
 	constructor(
 		@IEditorService private readonly _editorService: IEditorService,
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
@@ -149,7 +175,37 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			return undefined;
 		}
 		const recordUri = await seedDimRecord(this._fileService, this._environmentService.workspaceStorageHome, folder.uri, sourceUri);
+		if (recordUri) {
+			// Bring the record up to date for this file's current code (no-op when it is
+			// already current). Fire-and-forget: the placeholder is already in place, and
+			// the diagram viewer re-renders from its own watcher when the record changes.
+			this._generateRecord(sourceUri, folder.uri, recordUri);
+		}
 		return recordUri?.toString();
+	}
+
+	/**
+	 * Asks the extension host to (re)generate the `.dim` record for a source file, so a
+	 * file opened with a missing or stale record gets a diagram that matches its current
+	 * code. De-duplicated per source while a run is in flight; the generator script is the
+	 * authority on whether work is actually needed (it skips an unchanged file).
+	 */
+	private _generateRecord(sourceUri: URI, folderUri: URI, recordUri: URI): void {
+		const key = sourceUri.toString();
+		if (this._generating.has(key)) {
+			return;
+		}
+		const relPath = relativePath(folderUri, sourceUri);
+		if (!relPath) {
+			return;
+		}
+		this._generating.add(key);
+		Promise.resolve(this._commandService.executeCommand(GENERATE_RECORD_COMMAND, {
+			scriptUri: DIM_GENERATOR_URI.toString(),
+			sourceUri: sourceUri.toString(),
+			recordUri: recordUri.toString(),
+			relPath,
+		})).finally(() => this._generating.delete(key));
 	}
 
 	/**
