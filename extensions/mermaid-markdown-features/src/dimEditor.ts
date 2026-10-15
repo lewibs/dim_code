@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import { getMermaidEditorHtml } from './editorManager';
-import { parseDimRecord } from './dimRecord';
+import { IDimDiagramView, parseDimRecord } from './dimRecord';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
 import { MermaidWebviewManager } from './webviewManager';
@@ -13,33 +13,47 @@ export const dimEditorViewType = 'vscode.mermaid-markdown-features.dimEditor';
 
 /**
  * Command the native Dim view toggle (in the workbench editor title bar) runs to
- * switch which diagram a `.dim` custom editor shows. Called with the record's URI
- * (as a string) and the target diagram {@link DimDiagramType} tag. Duplicated as
- * `SHOW_DIAGRAM_COMMAND` in the workbench `dim.contribution`; keep the two in sync.
+ * switch which diagram this editor shows. Called with the *source file* URI (as a
+ * string) and the target diagram type tag. Duplicated as `SHOW_DIAGRAM_COMMAND` in
+ * the workbench `dim.contribution`; keep the two in sync.
  */
 const showDiagramCommand = '_dim.showDiagram';
 
-/** An open `.dim` editor: its panel, backing document and the diagram index shown. */
+/**
+ * Workbench command that maps a source file URI to its companion `.dim` record,
+ * seeding a placeholder if needed, and returns the record URI as a string (or
+ * `undefined` when the file gets no record). The path mapping lives in the
+ * workbench because it needs platform-only hashing the extension cannot import.
+ */
+const resolveRecordCommand = '_dim.resolveRecord';
+
+/** An open Dim diagram view: its panel, the record it reads, and the diagram shown. */
 interface IDimView {
 	readonly panel: vscode.WebviewPanel;
-	readonly document: vscode.TextDocument;
+	readonly recordUri: vscode.Uri | undefined;
+	readonly render: () => Promise<void>;
+	diagrams: readonly IDimDiagramView[];
 	index: number;
 }
 
 /**
- * Dim: renders a `.dim` record as a full-viewport mermaid diagram. A `.dim` record
- * is a JSON container of one or more diagrams; this editor shows one at a time. The
- * record's source file opens as a normal, editable editor — the native Dim view
- * toggle in the editor title bar switches a slot between that file and this diagram
- * viewer, and between the record's diagrams (via {@link showDiagramCommand}).
- * Registered as the default editor for `*.dim`.
+ * Dim: renders a source file's companion `.dim` record as a full-viewport mermaid
+ * diagram. The editor is registered (at `option` priority) for the same source-code
+ * resources as the normal text editor, so both views share one tab, path and
+ * breadcrumb — exactly like Markdown's text/preview pair. The record itself is a
+ * sidecar under the workspace storage home and is never opened as an editor; this
+ * provider looks it up via {@link resolveRecordCommand} and reads it directly.
+ *
+ * The native Dim view toggle in the editor title bar switches a slot between the
+ * text editor and this viewer (by reopening the same resource with a different
+ * editor override), and between the record's diagrams (via {@link showDiagramCommand}).
  */
-export class DimEditorProvider extends Disposable implements vscode.CustomTextEditorProvider {
+export class DimEditorProvider extends Disposable implements vscode.CustomReadonlyEditorProvider {
 
-	/** The open `.dim` editors, keyed by record URI, so the toggle can address them. */
+	/** The open diagram views, keyed by *source file* URI, so the toggle can address them. */
 	private readonly _views = new Map<string, IDimView>();
 
-	/** The diagram type to reveal once a not-yet-open record resolves (set by the toggle). */
+	/** The diagram type to reveal once a not-yet-open view resolves (set by the toggle). */
 	private readonly _pending = new Map<string, string>();
 
 	constructor(
@@ -51,7 +65,11 @@ export class DimEditorProvider extends Disposable implements vscode.CustomTextEd
 		this._register(vscode.commands.registerCommand(showDiagramCommand, (uri: string, type: string) => this._showDiagram(uri, type)));
 	}
 
-	public resolveCustomTextEditor(document: vscode.TextDocument, webviewPanel: vscode.WebviewPanel): void {
+	public openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
+		return { uri, dispose: () => { /* nothing to release; the record is read on resolve */ } };
+	}
+
+	public async resolveCustomEditor(document: vscode.CustomDocument, webviewPanel: vscode.WebviewPanel): Promise<void> {
 		const diagramId = generateUuid();
 		const key = document.uri.toString();
 
@@ -60,78 +78,101 @@ export class DimEditorProvider extends Disposable implements vscode.CustomTextEd
 			localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'chat-webview-out')]
 		};
 
-		const view: IDimView = { panel: webviewPanel, document, index: this._initialIndex(document, key) };
+		// Ask the workbench where this file's `.dim` record lives (seeding a placeholder
+		// if needed). The record is a sidecar outside the workspace, read via `fs`.
+		const recordUriStr = await vscode.commands.executeCommand<string | undefined>(resolveRecordCommand, key);
+		const recordUri = recordUriStr ? vscode.Uri.parse(recordUriStr) : undefined;
+
+		const view: IDimView = {
+			panel: webviewPanel,
+			recordUri,
+			diagrams: [],
+			index: 0,
+			render: async () => {
+				view.diagrams = recordUri ? await loadDiagrams(recordUri) : [];
+				view.index = view.diagrams.length > 0 ? Math.max(0, Math.min(view.index, view.diagrams.length - 1)) : 0;
+				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.diagrams, diagramId, view.index);
+			}
+		};
+		view.index = this._initialIndex(key, view.diagrams);
 		this._views.set(key, view);
 
-		const render = () => {
-			const diagrams = parseDimRecord(document.getText());
-			view.index = Math.max(0, Math.min(view.index, diagrams.length - 1));
-			webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, diagrams, diagramId, view.index);
-		};
+		// Keep the pan/zoom commands and copy-source working against this webview. The
+		// record is a JSON container, so expose the first diagram's mermaid source.
+		const disposables: vscode.Disposable[] = [];
+		disposables.push(this._webviewManager.registerWebview(diagramId, webviewPanel.webview, '', document.uri.fsPath, 'editor'));
 
-		// Keep the pan/zoom commands and copy-source working against this webview.
-		// The record is a JSON container, so expose the first diagram's mermaid
-		// source (not the raw JSON) to the manager.
-		const registration = this._webviewManager.registerWebview(diagramId, webviewPanel.webview, parseDimRecord(document.getText())[0]?.mermaid ?? '', document.fileName, 'editor');
+		// Watch the record so agent-driven updates re-render the diagram live.
+		if (recordUri) {
+			const dir = vscode.Uri.joinPath(recordUri, '..');
+			const base = recordUri.path.substring(recordUri.path.lastIndexOf('/') + 1);
+			const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(dir, base));
+			disposables.push(watcher, watcher.onDidChange(() => view.render()), watcher.onDidCreate(() => view.render()));
+		}
 
-		const changeSubscription = vscode.workspace.onDidChangeTextDocument(e => {
-			if (e.document.uri.toString() === key) {
-				render();
-			}
-		});
-
-		const viewStateSubscription = webviewPanel.onDidChangeViewState(e => {
+		disposables.push(webviewPanel.onDidChangeViewState(e => {
 			if (e.webviewPanel.active) {
 				this._webviewManager.setActiveWebview(diagramId);
 			}
-		});
+		}));
 
 		webviewPanel.onDidDispose(() => {
 			if (this._views.get(key) === view) {
 				this._views.delete(key);
 			}
-			changeSubscription.dispose();
-			viewStateSubscription.dispose();
-			registration.dispose();
+			for (const disposable of disposables) {
+				disposable.dispose();
+			}
 		});
 
-		render();
+		await view.render();
 	}
 
 	/**
-	 * The diagram index a freshly resolved record should show: the one the toggle
+	 * The diagram index a freshly resolved view should show: the one the toggle
 	 * selected before the editor opened (consumed here), else the first diagram.
 	 *
-	 * @param document The record's backing document.
-	 * @param key The record URI used as the view key.
+	 * @param key The source file URI used as the view key.
+	 * @param diagrams The diagrams the view currently holds.
 	 */
-	private _initialIndex(document: vscode.TextDocument, key: string): number {
+	private _initialIndex(key: string, diagrams: readonly IDimDiagramView[]): number {
 		const pendingType = this._pending.get(key);
 		this._pending.delete(key);
-		return pendingType ? this._indexForType(document, pendingType) : 0;
-	}
-
-	/** The index of the first diagram with the given type tag, or 0 when none match. */
-	private _indexForType(document: vscode.TextDocument, type: string): number {
-		const index = parseDimRecord(document.getText()).findIndex(d => d.type === type);
+		if (!pendingType) {
+			return 0;
+		}
+		const index = diagrams.findIndex(d => d.type === pendingType);
 		return index >= 0 ? index : 0;
 	}
 
 	/**
-	 * Reveals a record's diagram of the given type. The selection is always
-	 * remembered so that a record resolving (or reopening) shows it in its initial
-	 * render; when a webview for the record is already open, it is also switched in
-	 * place (no reload).
+	 * Reveals the diagram of the given type for a source file. The selection is always
+	 * remembered so that a view resolving (or reopening) shows it in its initial render;
+	 * when a view is already open, it is also switched in place (no reload).
 	 *
-	 * @param uri The record URI, as a string.
+	 * The in-place switch is synchronous (no `await` before `postMessage`) so rapid
+	 * toggle clicks reach the webview in click order and the last one wins.
+	 *
+	 * @param uri The source file URI, as a string.
 	 * @param type The target diagram type tag.
 	 */
 	private _showDiagram(uri: string, type: string): void {
 		this._pending.set(uri, type);
 		const view = this._views.get(uri);
 		if (view) {
-			view.index = this._indexForType(view.document, type);
+			const index = view.diagrams.findIndex(d => d.type === type);
+			view.index = index >= 0 ? index : 0;
 			view.panel.webview.postMessage({ type: 'dimSelectDiagram', index: view.index });
 		}
+	}
+}
+
+/** Reads and parses a `.dim` record, or `[]` when it is missing or unreadable. */
+async function loadDiagrams(recordUri: vscode.Uri): Promise<IDimDiagramView[]> {
+	try {
+		const bytes = await vscode.workspace.fs.readFile(recordUri);
+		return parseDimRecord(new TextDecoder().decode(bytes));
+	} catch {
+		return [];
 	}
 }

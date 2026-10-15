@@ -37,10 +37,10 @@
         "displayName": "%customEditor.dimEditor.displayName%",
         "selector": [
           {
-            "filenamePattern": "*.dim"
+            "filenamePattern": "*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,pyw,pyi,java,kt,kts,scala,groovy,c,h,cc,cpp,cxx,hpp,hh,hxx,cs,go,rs,rb,php,swift,m,mm,sh,bash,zsh,fish,pl,pm,lua,r,dart,ex,exs,erl,hs,fs,fsx,vb,clj,cljs,sql,vue,svelte,html,htm,css,scss,sass,less}"
           }
         ],
-        "priority": "default"
+        "priority": "option"
       }
     ],
     "commands": [

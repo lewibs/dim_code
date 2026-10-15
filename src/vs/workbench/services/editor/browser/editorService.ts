@@ -33,10 +33,9 @@ import { IEditorResolverService, ResolvedStatus } from '../common/editorResolver
 import { IWorkspaceTrustRequestService, WorkspaceTrustUriResponse } from '../../../../platform/workspace/common/workspaceTrust.js';
 import { IHostService } from '../../host/browser/host.js';
 import { findGroup } from '../common/editorGroupFinder.js';
+import { findReusableDimEditor } from '../../dimDiagram/common/dimDiagramView.js';
 import { ITextEditorService } from '../../textfile/common/textEditorService.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
-import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
-import { seedDimRecord } from '../../../../platform/agentHost/common/dimHookStorage.js';
 
 export class EditorService extends Disposable implements EditorServiceImpl {
 
@@ -81,8 +80,7 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		@IEditorResolverService private readonly editorResolverService: IEditorResolverService,
 		@IWorkspaceTrustRequestService private readonly workspaceTrustRequestService: IWorkspaceTrustRequestService,
 		@IHostService private readonly hostService: IHostService,
-		@ITextEditorService private readonly textEditorService: ITextEditorService,
-		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService
+		@ITextEditorService private readonly textEditorService: ITextEditorService
 	) {
 		super();
 
@@ -96,7 +94,7 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	}
 
 	createScoped(editorGroupsContainer: IEditorGroupsContainer, disposables: DisposableStore): IEditorService {
-		return disposables.add(new EditorService(editorGroupsContainer, this.editorGroupService, this.instantiationService, this.fileService, this.configurationService, this.contextService, this.uriIdentityService, this.editorResolverService, this.workspaceTrustRequestService, this.hostService, this.textEditorService, this.environmentService));
+		return disposables.add(new EditorService(editorGroupsContainer, this.editorGroupService, this.instantiationService, this.fileService, this.configurationService, this.contextService, this.uriIdentityService, this.editorResolverService, this.workspaceTrustRequestService, this.hostService, this.textEditorService));
 	}
 
 	private registerListeners(): void {
@@ -531,44 +529,6 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 
 	//#endregion
 
-	//#region Dim: open the `.dim` change record of a file
-
-	/**
-	 * Dim: resolve the companion `.dim` change record a file open should be
-	 * redirected to, or `undefined` to open the file itself. Every open path in
-	 * the workbench — the explorer, Quick Open (Ctrl+P), Go to File,
-	 * drag-and-drop — funnels an untyped resource input through
-	 * {@link openEditor}/{@link openEditors}, so seeding at those two call sites
-	 * covers them all with a single seam.
-	 *
-	 * The file itself still opens as a normal editor (so it stays editable, with
-	 * full language and extension support); the record is seeded in the background
-	 * so that every source file has one, and the native Dim view toggle in the
-	 * editor title bar can offer its diagrams. The `.dim` custom editor renders the
-	 * record's contents as a mermaid diagram when that toggle switches to it.
-	 *
-	 * No-ops whenever there is no record to seed: the open is not a plain resource
-	 * input (diff, merge or an already-typed input), the file is not a source-code
-	 * file, it is not part of the open workspace, or it is itself a record under the
-	 * storage root (guarding against seeding a record for a record).
-	 */
-	private async ensureDimRecord(editor: EditorInput | IUntypedEditorInput): Promise<void> {
-		if (!isResourceEditorInput(editor)) {
-			return;
-		}
-
-		const folder = this.contextService.getWorkspaceFolder(editor.resource);
-		if (!folder) {
-			return;
-		}
-
-		// Seed the file's `.dim` change record (a placeholder when the hook has not
-		// written one yet); the `.dim` editor renders its diagrams as mermaid.
-		await seedDimRecord(this.fileService, this.environmentService.workspaceStorageHome, folder.uri, editor.resource);
-	}
-
-	//#endregion
-
 	//#region openEditor()
 
 	openEditor(editor: EditorInput, options?: IEditorOptions, group?: PreferredGroup): Promise<IEditorPane | undefined>;
@@ -579,10 +539,6 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	openEditor(editor: IResourceDiffEditorInput, group?: PreferredGroup): Promise<ITextDiffEditorPane | undefined>;
 	openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined>;
 	async openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined> {
-		// Dim: seed the file's `.dim` change record so the title-bar view toggle can
-		// offer its diagrams; the file itself still opens as a normal editor.
-		await this.ensureDimRecord(editor);
-
 		let typedEditor: EditorInput | undefined = undefined;
 		let options = isEditorInput(editor) ? optionsOrPreferredGroup as IEditorOptions : editor.options;
 		let group: IEditorGroup | undefined = undefined;
@@ -638,6 +594,14 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 			options = { ...options, preserveFocus: false };
 		}
 
+		// Dim: a source file's diagram viewer and its text editor are distinct editor inputs
+		// for the same resource. If the diagram is already open in this group, reveal it rather
+		// than opening a duplicate text tab, so both views stay a single logical file/tab.
+		const reusableDimEditor = findReusableDimEditor(typedEditor, group.editors, (a, b) => this.uriIdentityService.extUri.isEqual(a, b));
+		if (reusableDimEditor) {
+			return group.openEditor(reusableDimEditor, options);
+		}
+
 		return group.openEditor(typedEditor, options);
 	}
 
@@ -663,12 +627,6 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		// Find target groups for editors to open
 		const mapGroupToTypedEditors = new Map<IEditorGroup, Array<EditorInputWithOptions>>();
 		for (const editor of editors) {
-			// Dim: seed each file's `.dim` change record so the title-bar view toggle
-			// can offer its diagrams; the file itself still opens as a normal editor.
-			if (!isEditorInputWithOptions(editor)) {
-				await this.ensureDimRecord(editor);
-			}
-
 			let typedEditor: EditorInputWithOptions | undefined = undefined;
 			let group: IEditorGroup | undefined = undefined;
 

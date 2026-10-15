@@ -1,5 +1,6 @@
 # File System Storage Notes
 
+
 Where Dim (this VS Code fork) stores project-related files, and how to persist our own per-project data.
 
 ## TODO

@@ -12,6 +12,7 @@ import { IHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegate.
 import { IManagedHover } from '../../../../base/browser/ui/hover/hover.js';
 import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
+import { IAction, toAction } from '../../../../base/common/actions.js';
 import { timeout } from '../../../../base/common/async.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -40,10 +41,8 @@ import { IListService, WorkbenchAsyncDataTree, WorkbenchDataTree, WorkbenchListF
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { defaultBreadcrumbsWidgetStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
-import { dimSourceFromRecordUri } from '../../../../platform/agentHost/common/dimHookStorage.js';
-import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { EditorResourceAccessor, IEditorPartOptions, SideBySideEditor } from '../../../common/editor.js';
-import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
+import { IDimDiagramViewOption, IDimDiagramViewService } from '../../../services/dimDiagram/common/dimDiagramView.js';
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { hiddenEditorTypesSettingId, IEditorResolverService } from '../../../services/editor/common/editorResolverService.js';
 import { ACTIVE_GROUP, ACTIVE_GROUP_TYPE, IEditorService, SIDE_GROUP, SIDE_GROUP_TYPE } from '../../../services/editor/common/editorService.js';
@@ -306,9 +305,8 @@ export class BreadcrumbsControl {
 		@ILabelService private readonly _labelService: ILabelService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IHoverService private readonly _hoverService: IHoverService,
-		@IBreadcrumbsService breadcrumbsService: IBreadcrumbsService,
-		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
-		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService
+		@IDimDiagramViewService private readonly _dimDiagramViewService: IDimDiagramViewService,
+		@IBreadcrumbsService breadcrumbsService: IBreadcrumbsService
 	) {
 		this.domNode = document.createElement('div');
 		this.domNode.classList.add('breadcrumbs-control');
@@ -345,6 +343,9 @@ export class BreadcrumbsControl {
 					this._updateEditorTypeControl();
 				}
 			}));
+			// A Dim file's record resolves asynchronously after the editor becomes active, so
+			// refresh the picker when its view options land (and when they change in place).
+			this._disposables.add(this._dimDiagramViewService.onDidChangeViewOptions(() => this._updateEditorTypeControl()));
 		}
 
 		this._ckBreadcrumbsPossible = BreadcrumbsControl.CK_BreadcrumbsPossible.bindTo(this._contextKeyService);
@@ -432,11 +433,7 @@ export class BreadcrumbsControl {
 		// honor diff editors and such
 		const canonicalUri = EditorResourceAccessor.getCanonicalUri(this._editorGroup.activeEditor, { supportSideBySide: SideBySideEditor.PRIMARY });
 		const originalUri = EditorResourceAccessor.getOriginalUri(this._editorGroup.activeEditor, { supportSideBySide: SideBySideEditor.PRIMARY });
-		const resourceUri = originalUri ?? canonicalUri;
-		// Dim: the diagram viewer is opened on a hidden `.dim` record under the
-		// storage root. Show the breadcrumbs for the source file it mirrors instead,
-		// so the trail always points at the real file regardless of the active view.
-		const uri = (resourceUri && dimSourceFromRecordUri(this._environmentService.workspaceStorageHome, this._workspaceContextService.getWorkspace().folders.map(folder => folder.uri), resourceUri)) ?? resourceUri;
+		const uri = originalUri ?? canonicalUri;
 		const wasHidden = this.isHidden();
 
 		if (!uri || !this._fileService.hasProvider(uri)) {
@@ -533,15 +530,26 @@ export class BreadcrumbsControl {
 	private _updateEditorTypeControl(): void {
 		const previousWidth = this._editorTypeNode?.offsetWidth ?? 0;
 
-		const available = (this._options.showEditorTypePicker && this._cfShowEditorType.getValue()) ? this._getAvailableEditorTypes() : undefined;
-		if (!available) {
-			this._hideEditorTypeControl();
-		} else {
+		const dimOptions = this._getDimViewOptions();
+		if (dimOptions) {
+			// A Dim source file: show the current view's label (Raw, Structure, …) in place of
+			// the generic editor type, like Markdown's text/preview picker.
 			const { label: editorTypeLabel, hover: editorTypeHover } = this._createEditorTypeControl();
-			const current = available.editors.find(editor => editor.id === available.currentId);
-			const label = current ? editorTypeDisplayLabel(current, available.isDiffEditor) : available.currentId;
-			editorTypeLabel.textContent = label;
-			editorTypeHover.update(localize('editorType.hover', "Editor: {0}", label));
+			const current = dimOptions.find(option => option.checked) ?? dimOptions[0];
+			console.log('[dim] breadcrumb paint label', { label: current.label, options: dimOptions.map(o => ({ id: o.id, checked: o.checked })) });
+			editorTypeLabel.textContent = current.label;
+			editorTypeHover.update(localize('editorType.hover', "Editor: {0}", current.label));
+		} else {
+			const available = (this._options.showEditorTypePicker && this._cfShowEditorType.getValue()) ? this._getAvailableEditorTypes() : undefined;
+			if (!available) {
+				this._hideEditorTypeControl();
+			} else {
+				const { label: editorTypeLabel, hover: editorTypeHover } = this._createEditorTypeControl();
+				const current = available.editors.find(editor => editor.id === available.currentId);
+				const label = current ? editorTypeDisplayLabel(current, available.isDiffEditor) : available.currentId;
+				editorTypeLabel.textContent = label;
+				editorTypeHover.update(localize('editorType.hover', "Editor: {0}", label));
+			}
 		}
 
 		// The dropdown width may have changed (different editor label or visibility toggled). Since the
@@ -559,6 +567,19 @@ export class BreadcrumbsControl {
 			this._editorResolverService,
 			this._configurationService.getValue<readonly string[]>(hiddenEditorTypesSettingId)
 		);
+	}
+
+	/**
+	 * The Dim views (Raw plus each diagram the file's `.dim` record holds) for the active
+	 * editor, or `undefined` when it is not a Dim source file — in which case the picker
+	 * falls back to the normal editor-type list.
+	 */
+	private _getDimViewOptions(): readonly IDimDiagramViewOption[] | undefined {
+		if (!this._options.showEditorTypePicker || !this._cfShowEditorType.getValue()) {
+			return undefined;
+		}
+		const activeEditor = this._editorGroup.activeEditor;
+		return activeEditor ? this._dimDiagramViewService.getViewOptions(activeEditor) : undefined;
 	}
 
 	private _createEditorTypeControl(): { label: HTMLSpanElement; hover: IManagedHover } {
@@ -597,11 +618,25 @@ export class BreadcrumbsControl {
 		if (!editorTypeNode) {
 			return;
 		}
-		const available = this._getAvailableEditorTypes();
-		if (!available) {
-			return;
+		let actions: IAction[];
+		const dimOptions = this._getDimViewOptions();
+		if (dimOptions) {
+			// Each entry switches the same editor slot between Raw and a diagram view via the
+			// Dim view commands, with the current view checked — no "Set Default" submenu, since
+			// these are not editor associations.
+			actions = dimOptions.map(option => toAction({
+				id: option.commandId,
+				label: option.label,
+				checked: option.checked,
+				run: () => this._commandService.executeCommand(option.commandId)
+			}));
+		} else {
+			const available = this._getAvailableEditorTypes();
+			if (!available) {
+				return;
+			}
+			actions = createEditorTypeActions(available, this._editorGroup, this._editorResolverService, this._commandService, this._editorService);
 		}
-		const actions = createEditorTypeActions(available, this._editorGroup, this._editorResolverService, this._commandService, this._editorService);
 		this._contextMenuService.showContextMenu({
 			getAnchor: () => editorTypeNode,
 			getActions: () => actions
