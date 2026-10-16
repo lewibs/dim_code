@@ -27,7 +27,6 @@ function labelForType(type: string): string {
 		case 'flowchart': return 'Logic';
 		case 'stateDiagram': return 'States';
 		case 'erDiagram': return 'Data';
-		case 'mindmap': return 'Overview';
 		default: return fallbackLabel;
 	}
 }
@@ -38,7 +37,6 @@ function inferType(mermaid: string): string {
 	if (head.startsWith('sequencediagram')) { return 'sequenceDiagram'; }
 	if (head.startsWith('statediagram')) { return 'stateDiagram'; }
 	if (head.startsWith('erdiagram')) { return 'erDiagram'; }
-	if (head.startsWith('mindmap')) { return 'mindmap'; }
 	return 'flowchart';
 }
 

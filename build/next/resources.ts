@@ -48,6 +48,8 @@ const desktopResourcePatterns = [
 	// Shell scripts
 	'vs/base/node/*.sh',
 	'vs/platform/agentHost/node/claude/dimWorkflow/*.sh',
+	// Dim diagram catalog — data the generator script reads at runtime
+	'vs/platform/agentHost/node/claude/dimWorkflow/*.md',
 	'vs/workbench/contrib/terminal/common/scripts/*.sh',
 	'vs/workbench/contrib/terminal/common/scripts/*.ps1',
 	'vs/workbench/contrib/terminal/common/scripts/*.psm1',
@@ -88,6 +90,7 @@ const serverResourcePatterns = [
 
 	// Dim built-in agent hook
 	'vs/platform/agentHost/node/claude/dimWorkflow/*.sh',
+	'vs/platform/agentHost/node/claude/dimWorkflow/*.md',
 
 	// External Terminal
 	'vs/workbench/contrib/externalTerminal/**/*.scpt',

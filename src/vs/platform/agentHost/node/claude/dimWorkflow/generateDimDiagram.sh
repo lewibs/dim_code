@@ -136,21 +136,68 @@ fi
 # prompt. The model is told to emit ONLY a JSON object with a "readme" overview and a
 # "diagrams" array, which we wrap into the record below.
 code=$(head -c 60000 "$SRC")
+
+# The diagram catalog — which kinds exist and when to use each — is the single source
+# of truth, read here at runtime. It sits next to this script (and is copied beside it
+# into the materialized CLI-terminal plugin). The DimDiagramType enum in
+# dimDiagramTypes.ts mirrors its keywords for TypeScript, guarded by a drift test. We
+# build both the prompt's catalog block and the allowed-label list from it, so there is
+# nothing to keep in sync by hand.
+catalogFile="$(dirname "$0")/dimDiagramCatalog.md"
+catalogLines=""
+catalogLabels=""
+if [ -f "$catalogFile" ]; then
+	headerDone=0
+	# The catalog is a markdown table "| entity | diagram | keyword | label |" embedded in
+	# a markdown doc. Parse ONLY the table rows and ignore the surrounding prose: a table
+	# row starts with "|", so its leading cell (before the first "|") is empty. Skip prose
+	# (non-empty leading cell), the --- divider, and the first table row (the header).
+	while IFS='|' read -r _lead entity diagram keyword label _rest; do
+		# Not a table row (prose/blank): the text before the first "|" is non-empty.
+		if [ -n "$(printf '%s' "$_lead" | tr -d ' \t')" ]; then
+			continue
+		fi
+		# A row with no cells at all (e.g. a blank line) is not a table row either.
+		if [ -z "$(printf '%s' "$entity$diagram$keyword$label" | tr -d ' \t')" ]; then
+			continue
+		fi
+		# The |---|---| divider.
+		case "$entity$diagram$keyword$label" in
+			*---*) continue ;;
+		esac
+		# The first surviving row is the table header; skip it, keep the rest as data.
+		if [ "$headerDone" = 0 ]; then
+			headerDone=1
+			continue
+		fi
+		entity=$(printf '%s' "$entity" | sed 's/^[ \t]*//;s/[ \t]*$//')
+		diagram=$(printf '%s' "$diagram" | sed 's/^[ \t]*//;s/[ \t]*$//')
+		keyword=$(printf '%s' "$keyword" | sed 's/^[ \t]*//;s/[ \t]*$//')
+		label=$(printf '%s' "$label" | sed 's/^[ \t]*//;s/[ \t]*$//')
+		catalogLines="${catalogLines}- ${keyword} = ${label} = ${entity} → ${diagram}
+"
+		catalogLabels="${catalogLabels}${label}, "
+	done < "$catalogFile"
+	catalogLabels=$(printf '%s' "$catalogLabels" | sed 's/, $//')
+fi
+if [ -z "$catalogLines" ]; then
+	# Degraded fallback when the catalog file is missing (e.g. a stale plugin install):
+	# let the model pick any standard diagram rather than failing outright.
+	catalogLines="- use whichever standard Mermaid diagram (classDiagram, sequenceDiagram, flowchart, stateDiagram, erDiagram) best fits the code"
+	catalogLabels="a short title for the view"
+fi
+
 prompt=$(cat <<PROMPT_HEADER
-You document source files shown inside an IDE. For the code below, do two things: (1) write a plain-English overview of what the file is for — the role/intent of its main class or function, plus the input/output structure of any function it centers on — and (2) draw the Mermaid diagram(s) that genuinely help someone understand THIS code. Pick only the views that earn their place: one is usually right, a second only when it shows something the first cannot. Do NOT pad with a diagram that merely restates the overview or lists the file's parts; every diagram must reveal real structure or behavior from the code. Order them most-useful first.
+You document source files shown inside an IDE. For the code below, do two things: (1) write a plain-English description of what the file is for and the role/intent of its main class, functions or module, and (2) draw the Mermaid diagram(s) that genuinely help someone understand THIS code. Pick only the views that earn their place: one is usually right, a second only when it shows something the first cannot. Do NOT pad with a diagram that merely restates the overview or lists the file's parts; every diagram must reveal real structure or behavior from the code. Order them most-useful first.
 
 Diagram catalog (mermaid keyword = label = when to use):
-- classDiagram = Structure = a class/service/module: its types, members and relationships. The usual default for object-oriented or service code.
-- sequenceDiagram = Behavior = a function/method/endpoint that calls two or more collaborators, or an event/message flow: who calls whom, in order, across participants.
-- flowchart = Logic = one routine whose own branching/looping control flow is the point.
-- stateDiagram = States = code that models a lifecycle or state machine (a session, a connection, a picker).
-- erDiagram = Data = a relational / SQL-shaped schema or data model: entities and their relationships.
-
+${catalogLines}
 Rules:
-- "readme" is a plain-text overview (no markdown) of THIS file. First state the role/intent of its main class or function — what it is for, the responsibility it owns and the problem it solves (not just a restatement of its name). Then, when the file's focus is a function (or a few), give each one's input/output structure: the parameter names with their types (and notable accepted values), and the return type/value. Keep it concise and put each function's signature on its own line (use \\n between lines) so the inputs and outputs are easy to scan.
+- When the file holds several functions (a module with no single central class), do NOT just flowchart one of them. First decide the file's shape, then prefer a Structure view of the whole module (its interfaces plus its functions and their call relationships); add a Logic flowchart only for an individual function whose branching is genuinely the point.
+- "readme" is a plain-text description (no markdown) of THIS file: what it is for, the role/intent of its main class, functions or module, the responsibility it owns and the problem it solves (not just a restatement of its name). Keep it to a few sentences.
 - Base the diagram on what THIS code actually contains; use real identifiers from it.
 - When a type this file references is defined in the imported definitions provided below, populate it with its real members; never leave a referenced type as an empty box.
-- "label" MUST be exactly one of: Structure, Behavior, Logic, States, Data (matching the type you chose).
+- "label" MUST be exactly one of: ${catalogLabels} (matching the type you chose).
 - "mermaid" MUST be valid Mermaid source beginning with the diagram's keyword.
 - "diagrams" holds only the views that genuinely help (often just one), each a distinct type; never add a type just to have more.
 - Output ONLY a JSON object, no markdown fences and no prose outside it, shaped EXACTLY like (note the leading "{"):

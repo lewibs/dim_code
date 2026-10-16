@@ -20,82 +20,23 @@ export const enum DimDiagramType {
 	State = 'stateDiagram',
 	/** Entity-relationship diagram — a relational / SQL-shaped data model. */
 	Entity = 'erDiagram',
-	/** Mindmap — a hierarchical breakdown (feature tree, responsibilities). */
-	Mindmap = 'mindmap',
 }
 
 /**
- * Describes one diagram kind: how it is labelled in the UI, what code it suits,
- * when to reach for it, and whether it can be generated deterministically.
+ * Every diagram kind, in the canonical order the `.dim` viewer lists them. A plain
+ * array because {@link DimDiagramType} is a `const enum` and so has no runtime
+ * `Object.values`. Which kinds exist and when to use each is owned by the catalog
+ * data file `node/claude/dimWorkflow/dimDiagramCatalog.md` that the generator reads;
+ * this array mirrors its keywords for TypeScript, and a drift test keeps the two
+ * identical, so a kind can never be added to one without the other.
  */
-export interface IDimDiagramInfo {
-	/** Short, title-cased label shown on the `.dim` viewer toggle button. */
-	readonly label: string;
-	/** One-line description of what the diagram communicates. */
-	readonly summary: string;
-	/** The code entities this diagram is a natural fit for. */
-	readonly appliesTo: readonly string[];
-	/** The situation in which this is the right diagram to reach for. */
-	readonly useWhen: string;
-	/**
-	 * How the diagram can be produced: `structure` kinds come from the AST
-	 * deterministically, `behavior` kinds need LSP call-hierarchy and/or an LLM
-	 * because they encode ordering, state or intent the syntax alone does not carry.
-	 */
-	readonly dimension: 'structure' | 'behavior';
-}
-
-/**
- * The canonical mapping of diagram kind to the code structures and situations it
- * should be used for. This is the single source of truth that a diagram
- * generator consults to decide which diagram(s) a given code entity warrants; the
- * `.dim` viewer only renders whatever diagrams a record already holds. Keep this
- * in sync with the "Code entity -> diagram mapping" table in `PLAN.md`.
- */
-export const dimDiagramCatalog: { readonly [type in DimDiagramType]: IDimDiagramInfo } = {
-	[DimDiagramType.Class]: {
-		label: "Structure",
-		summary: "Types, members and relationships — what the code is made of.",
-		appliesTo: ['class', 'service', 'subsystem', 'feature', 'module'],
-		useWhen: "You want the shape of a class, a service and its dependencies, or the main components of a feature.",
-		dimension: 'structure',
-	},
-	[DimDiagramType.Sequence]: {
-		label: "Behavior",
-		summary: "Who calls whom, in what order, across participants.",
-		appliesTo: ['function', 'method', 'api', 'endpoint', 'event', 'feature'],
-		useWhen: "A callable fans out to two or more collaborators, or you want to trace a flow across files.",
-		dimension: 'behavior',
-	},
-	[DimDiagramType.Flowchart]: {
-		label: "Logic",
-		summary: "Control flow — guards, branches and loops within one routine.",
-		appliesTo: ['function', 'method', 'event'],
-		useWhen: "A routine's own branching logic is the thing worth understanding, or for a high-level component graph.",
-		dimension: 'structure',
-	},
-	[DimDiagramType.State]: {
-		label: "States",
-		summary: "The modes a component moves through and the transitions between them.",
-		appliesTo: ['class', 'service', 'component', 'parameter', 'field', 'property'],
-		useWhen: "Code models a lifecycle or state machine (a picker, a connection, a session), or an individual class parameter/field whose value moves through a fixed set of modes.",
-		dimension: 'behavior',
-	},
-	[DimDiagramType.Entity]: {
-		label: "Data",
-		summary: "Entities and their relationships — a relational data model.",
-		appliesTo: ['schema', 'entity', 'model'],
-		useWhen: "There is an actual relational / SQL-shaped schema to show.",
-		dimension: 'structure',
-	},
-	[DimDiagramType.Mindmap]: {
-		label: "Overview",
-		summary: "A hierarchical breakdown of a thing into its parts.",
-		appliesTo: ['subsystem', 'feature', 'whole-app'],
-		useWhen: "You want a top-level feature tree or a responsibilities overview at a glance.",
-		dimension: 'structure',
-	},
-};
+export const dimDiagramTypes: readonly DimDiagramType[] = [
+	DimDiagramType.Class,
+	DimDiagramType.Sequence,
+	DimDiagramType.Flowchart,
+	DimDiagramType.State,
+	DimDiagramType.Entity,
+];
 
 /**
  * The default label for a diagram whose stored `type` is not a known
@@ -116,17 +57,26 @@ export function inferDimDiagramType(mermaid: string): DimDiagramType {
 	if (head.startsWith('sequencediagram')) { return DimDiagramType.Sequence; }
 	if (head.startsWith('statediagram')) { return DimDiagramType.State; }
 	if (head.startsWith('erdiagram')) { return DimDiagramType.Entity; }
-	if (head.startsWith('mindmap')) { return DimDiagramType.Mindmap; }
 	return DimDiagramType.Flowchart;
 }
 
 /**
- * Resolves the UI label for a stored diagram `type`, falling back to the diagram's
- * own `label` where given, then to {@link dimDiagramFallbackLabel}.
+ * The short, title-cased label stored for a diagram of the given `type`. This is the
+ * record's own fallback label (the generator already writes a `label` from the catalog
+ * data file); keep the strings in step with the labels in `dimDiagramCatalog.md`. The
+ * `.dim` viewer's toggle uses its own localized labels, so these are plain English
+ * record data, not UI strings. Unknown/legacy types fall back to
+ * {@link dimDiagramFallbackLabel}.
  *
  * @param type The stored diagram type tag.
  */
 export function dimDiagramLabel(type: string): string {
-	const info = (dimDiagramCatalog as Record<string, IDimDiagramInfo>)[type];
-	return info ? info.label : dimDiagramFallbackLabel;
+	switch (type) {
+		case DimDiagramType.Class: return "Structure";
+		case DimDiagramType.Sequence: return "Behavior";
+		case DimDiagramType.Flowchart: return "Logic";
+		case DimDiagramType.State: return "States";
+		case DimDiagramType.Entity: return "Data";
+		default: return dimDiagramFallbackLabel;
+	}
 }

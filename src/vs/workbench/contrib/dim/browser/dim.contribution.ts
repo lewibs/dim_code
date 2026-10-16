@@ -9,7 +9,7 @@ import { FileAccess } from '../../../../base/common/network.js';
 import { relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
-import { DimDiagramType, dimDiagramCatalog } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
+import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
 import { DIM_EDITOR_VIEW_TYPE, IDimDiagram, isDimCodeFile, parseDimRecord, seedDimRecord } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
@@ -55,7 +55,7 @@ const GENERATE_RECORD_COMMAND = '_dim.generateRecord';
 const DIM_GENERATOR_URI = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/generateDimDiagram.sh');
 
 /** The diagram types in the order they appear in the view picker. */
-const dimDiagramTypeOrder = Object.keys(dimDiagramCatalog) as DimDiagramType[];
+const dimDiagramTypeOrder: readonly DimDiagramType[] = dimDiagramTypes;
 
 /** Localized title for each diagram kind's view in the picker. */
 function dimViewTitle(type: DimDiagramType): string {
@@ -65,7 +65,6 @@ function dimViewTitle(type: DimDiagramType): string {
 		case DimDiagramType.Flowchart: return localize('dim.view.logic', "Logic");
 		case DimDiagramType.State: return localize('dim.view.states', "States");
 		case DimDiagramType.Entity: return localize('dim.view.data', "Data");
-		case DimDiagramType.Mindmap: return localize('dim.view.overview', "Overview");
 	}
 }
 
