@@ -24,7 +24,11 @@ import { McpServerType } from '../../../mcp/common/mcpPlatformTypes.js';
 import type { IMcpServerDefinition } from '../../../agentPlugins/common/pluginParsers.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { resolveMcpServerWorkingDirectory } from '../shared/mcpServerWorkingDirectory.js';
-import { dimDefaultHookGroup } from './dimWorkflow/dimWorkflow.js';
+// DISABLED (Dim): the built-in agent Stop hook is turned off for now to avoid a
+// Claude Haiku call on every finished turn. Diagram generation still happens on
+// file open (gated on the source content hash). Re-enable by restoring this import
+// and the `hooks.Stop = …` assignment below.
+// import { dimDefaultHookGroup } from './dimWorkflow/dimWorkflow.js';
 
 type ClaudeSdkDeniedMcpServerSpec = NonNullable<Settings['deniedMcpServers']>[number];
 
@@ -158,13 +162,15 @@ export async function buildOptions(
 		PATH: `${dirname(resolvedRgDiskPath)}${delimiter}${process.env.PATH ?? ''}`,
 	};
 	const hooks: NonNullable<Options['hooks']> = {};
-	// Dim built-in agent hook: unconditionally runs the bundled workflow script
-	// once when the agent finishes a turn, recording a `.dim` change record for
-	// each file updated during the turn. Applies in every build and workspace.
-	hooks.Stop = [dimDefaultHookGroup(logStderr, {
-		workspaceDir: input.workingDirectory.fsPath,
-		dimStorageDir: input.dimHookStorageDir?.fsPath,
-	})];
+	// DISABLED (Dim): the built-in agent Stop hook ran the bundled workflow script
+	// once when the agent finished a turn, recording a `.dim` change record for each
+	// file updated during the turn. It is off for now because each run can spend a
+	// Claude Haiku call per changed file; diagrams are still generated on file open.
+	// Re-enable by restoring the import above and this assignment.
+	// hooks.Stop = [dimDefaultHookGroup(logStderr, {
+	// 	workspaceDir: input.workingDirectory.fsPath,
+	// 	dimStorageDir: input.dimHookStorageDir?.fsPath,
+	// })];
 	const preToolUseHooks: NonNullable<Options['hooks']>['PreToolUse'] = [];
 	if (input.onPreToolUse) {
 		preToolUseHooks.push({

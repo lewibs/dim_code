@@ -171,16 +171,20 @@ class ClaudeTerminalViewPane extends ViewPane {
 			const hookCommand = dimStorageDir
 				? `DIM_DIM_DIR="${dimStorageDir}" sh "\${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"`
 				: 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"';
+			// DISABLED (Dim): the Stop hook is off for now because each run can spend a
+			// Claude Haiku call per changed file; diagrams are still generated on file
+			// open. The scripts are still copied below, so set this to `true` to re-enable.
+			const stopHookEnabled = false;
 			const hooks = {
 				description: 'Dim built-in hooks',
-				hooks: {
+				hooks: stopHookEnabled ? {
 					// Fire once when the agent finishes its turn (end of its response),
 					// rather than before every tool call.
 					Stop: [{
 						matcher: '',
 						hooks: [{ type: 'command', command: hookCommand }]
 					}]
-				}
+				} : {}
 			};
 			await this._fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
 			await this._fileService.writeFile(joinPath(hooksDir, 'hooks.json'), VSBuffer.fromString(JSON.stringify(hooks, null, '\t')));
