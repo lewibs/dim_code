@@ -32,6 +32,7 @@ import { IEditorGroupsService } from '../../../services/editor/common/editorGrou
 import { CustomEditorInput } from '../../customEditor/browser/customEditorInput.js';
 import { customEditorViewOptions } from '../../customEditor/common/customEditorView.js';
 import { IDimPendingEditsService } from './dimPendingEdits.js';
+import './dimUpdatingPill.js';
 
 /**
  * Command run by the Dim diagram viewer to switch the currently shown diagram.

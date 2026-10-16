@@ -52,8 +52,8 @@ fi
 # git status --porcelain emits two status chars, a space, then the path. For a
 # rename the path is "old -> new"; we record the new path. Other quoting cases
 # (paths with unusual characters) are left to git's defaults. The loop only picks
-# the files; they are generated afterwards, several at a time (see below).
-echo "$changed" | while IFS= read -r line; do
+# the files, one per line; they are generated afterwards, several at a time (see below).
+files=$(echo "$changed" | while IFS= read -r line; do
 	path=$(printf '%s' "$line" | cut -c4-)
 	case "$path" in
 		*" -> "*) path=${path##* -> } ;;
@@ -78,12 +78,34 @@ echo "$changed" | while IFS= read -r line; do
 		*) continue ;;
 	esac
 
-	printf '%s\0' "$path"
-done |
+	printf '%s\n' "$path"
+done)
+if [ -z "$files" ]; then
+	echo "No code files changed since last commit; nothing to record."
+	exit 0
+fi
+
+# While this run lasts it keeps a status file, "$DIM_DIM_DIR/.updating/<pid>", that the
+# editor watches to show its "Updating diagrams" pill: the first line is the number of
+# files to check and each finished file appends a line. A status file left behind by a
+# run that was killed is removed here. Mirrored by `dimUpdatingPill.ts`; keep the two in
+# sync.
+statusDir="$DIM_DIM_DIR/.updating"
+mkdir -p "$statusDir"
+for stale in "$statusDir"/*; do
+	[ -f "$stale" ] || continue
+	kill -0 "${stale##*/}" 2>/dev/null || rm -f "$stale"
+done
+status="$statusDir/$$"
+printf '%s\n' "$files" | wc -l | tr -d ' ' > "$status"
+trap 'rm -f "$status"' EXIT
+trap 'exit 130' INT TERM HUP
+
 # Delegate to the shared generator, which picks the diagrams for each file's code and
 # (re)writes the record only when the source has changed. Each file takes Claude about
 # a minute, so DIM_HOOK_JOBS (default 4) files are generated at once to have the records
 # ready before the user opens them. Invoked via `sh` (as this hook itself is launched)
 # so it runs even when the copied script, written without an executable bit, is not
-# marked executable.
-xargs -0 -P "${DIM_HOOK_JOBS:-4}" -I{} sh "$generator" "$root/{}" "$DIM_DIM_DIR/{}.dim" "{}"
+# marked executable. Paths reach the inner shell as arguments, never as code.
+printf '%s\n' "$files" | tr '\n' '\0' |
+	xargs -0 -P "${DIM_HOOK_JOBS:-4}" -I{} sh -c 'sh "$1" "$2/$5" "$3/$5.dim" "$5"; echo >> "$4"' sh "$generator" "$root" "$DIM_DIM_DIR" "$status" {}
