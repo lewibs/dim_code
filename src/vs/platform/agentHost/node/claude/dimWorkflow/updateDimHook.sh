@@ -11,9 +11,9 @@
 #
 # Inputs (set by the caller):
 #   cwd          - the workspace root, so git sees the project repository
-#   DIM_DIM_DIR  - directory the ".dim" records are written under (kept out of
-#                  the repo). Records mirror the repo-relative path of each
-#                  changed file with a ".dim" suffix: src/foo.ts -> $DIM_DIM_DIR/src/foo.ts.dim
+#   DIM_DIM_DIR  - directory the ".dim" records are written under: the workspace's
+#                  ".dim" records folder. Records mirror the repo-relative path of
+#                  each changed file with a ".dim" suffix: src/foo.ts -> $DIM_DIM_DIR/src/foo.ts.dim
 
 # The shared per-file generator sits next to this script (in the bundled build and
 # in the materialized CLI-terminal plugin, both scripts live in the same folder).
@@ -30,6 +30,15 @@ if [ -z "$DIM_DIM_DIR" ]; then
 fi
 
 root=$(pwd)
+
+# A new records folder ignores itself in git via its own ".gitignore", matching the
+# default of the "dim.diagrams.gitignore" setting (which the editor then applies on
+# its next start or setting change). Mirrors `syncDimRecordsGitignore` in
+# dimHookStorage.ts; keep the two in sync.
+if [ ! -d "$DIM_DIM_DIR" ]; then
+	mkdir -p "$DIM_DIM_DIR"
+	printf '# Dim diagram records. Turn off the "dim.diagrams.gitignore" setting to commit them with the code.\n*\n' > "$DIM_DIM_DIR/.gitignore"
+fi
 
 # `--untracked-files=all` lists each new file individually; without it git collapses
 # a wholly-untracked directory to a single entry (e.g. "src/") and its files would

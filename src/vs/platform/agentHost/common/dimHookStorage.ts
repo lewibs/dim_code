@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../../base/common/buffer.js';
-import { stringHash } from '../../../base/common/hash.js';
 import { extname, extUri, joinPath, relativePath } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 import { IFileService } from '../../files/common/files.js';
@@ -160,23 +159,57 @@ export function isDimCodeFile(file: URI): boolean {
 }
 
 /**
- * Resolves the directory where the Dim `updateDimHook` agent hook writes its
- * per-file `.dim` change records for a given workspace folder.
+ * The folder, at the root of each workspace folder, that holds its `.dim` records.
+ * Mirrored by `updateDimHook.sh` (via `DIM_DIM_DIR`); keep the two in sync.
+ */
+const dimRecordsFolderName = '.dim';
+
+/**
+ * The contents of the `.gitignore` kept in a records folder while the records are
+ * not committed. `*` matches everything in the folder, the `.gitignore` itself
+ * included, so git ignores the whole folder without the project's own `.gitignore`
+ * being touched.
+ */
+const dimRecordsGitignore = '# Dim diagram records. Turn off the "dim.diagrams.gitignore" setting to commit them with the code.\n*\n';
+
+/**
+ * Resolves the directory holding the `.dim` change records for a given workspace
+ * folder: `<workspaceFolder>/.dim`.
  *
- * The records are kept out of the repository and under the user-data root at
- * `<workspaceStorageHome>/dim/<key>`, so a project folder is never polluted with
- * generated files. `<key>` is a stable, non-cryptographic hash of the folder's
- * URI rather than VS Code's own per-workspace storage id: that id salts in the
- * folder's filesystem `ctime`, which is only reachable inside the workbench, so
- * a parallel `dim/` bucket lets both the native agent session and the
- * standalone CLI terminal agree on the same location from different layers.
+ * The records live with the code so they survive app restarts, rebuilds and resets of
+ * the user-data folder (VS Code's workspace-storage cleaner deletes any unrecognized
+ * folder there on every launch). By default the folder ignores itself in git (see
+ * {@link syncDimRecordsGitignore}) unless the user chooses to commit it.
  *
- * @param workspaceStorageHome The `workspaceStorageHome` from the environment service.
  * @param workspaceFolder The opened workspace folder the records belong to.
  */
-export function dimHookStorageDir(workspaceStorageHome: URI, workspaceFolder: URI): URI {
-	const key = (stringHash(workspaceFolder.toString(), 0) >>> 0).toString(16);
-	return joinPath(workspaceStorageHome, 'dim', key);
+export function dimHookStorageDir(workspaceFolder: URI): URI {
+	return joinPath(workspaceFolder, dimRecordsFolderName);
+}
+
+/**
+ * Adds or removes the `.gitignore` in a workspace folder's records folder, so git
+ * ignores the records (`ignoreInGit`) or sees them for committing. With
+ * `ignoreInGit`, this creates the records folder if needed; otherwise it never
+ * creates anything. Errors are swallowed: a concurrent call may have won the race,
+ * and the next sync converges either way.
+ *
+ * @param fileService The file service used to probe for and write the file.
+ * @param workspaceFolder The workspace folder whose records folder to update.
+ * @param ignoreInGit Whether git should ignore the records (the `.gitignore` exists).
+ */
+export async function syncDimRecordsGitignore(fileService: IFileService, workspaceFolder: URI, ignoreInGit: boolean): Promise<void> {
+	const gitignore = joinPath(dimHookStorageDir(workspaceFolder), '.gitignore');
+	try {
+		const exists = await fileService.exists(gitignore);
+		if (ignoreInGit && !exists) {
+			await fileService.createFile(gitignore, VSBuffer.fromString(dimRecordsGitignore), { overwrite: false });
+		} else if (!ignoreInGit && exists) {
+			await fileService.del(gitignore);
+		}
+	} catch {
+		// See above: another sync got there first.
+	}
 }
 
 /**
@@ -190,16 +223,15 @@ export function dimHookStorageDir(workspaceStorageHome: URI, workspaceFolder: UR
  * the path the hook builds from `git status`, so callers that redirect a file
  * open to its record resolve the same location the hook wrote.
  *
- * @param workspaceStorageHome The `workspaceStorageHome` from the environment service.
  * @param workspaceFolder The workspace folder the file belongs to.
  * @param file The workspace file whose change record is wanted.
  */
-export function dimHookRecordUri(workspaceStorageHome: URI, workspaceFolder: URI, file: URI): URI | undefined {
+export function dimHookRecordUri(workspaceFolder: URI, file: URI): URI | undefined {
 	const relative = relativePath(workspaceFolder, file);
 	if (relative === undefined || relative.length === 0 || relative.startsWith('..')) {
 		return undefined; // the file is outside the workspace folder
 	}
-	return joinPath(dimHookStorageDir(workspaceStorageHome, workspaceFolder), `${relative}.dim`);
+	return joinPath(dimHookStorageDir(workspaceFolder), `${relative}.dim`);
 }
 
 /**
@@ -210,18 +242,17 @@ export function dimHookRecordUri(workspaceStorageHome: URI, workspaceFolder: URI
  * storage directories.
  *
  * This lets the diagram viewer present itself as its source file (tab, breadcrumbs)
- * even though the editor is opened on the hidden record under the storage root.
+ * even though the editor is opened on the record in the records folder.
  *
- * @param workspaceStorageHome The `workspaceStorageHome` from the environment service.
  * @param workspaceFolders The opened workspace folders to resolve against.
  * @param record The `.dim` record URI to map back to its source file.
  */
-export function dimSourceFromRecordUri(workspaceStorageHome: URI, workspaceFolders: readonly URI[], record: URI): URI | undefined {
+export function dimSourceFromRecordUri(workspaceFolders: readonly URI[], record: URI): URI | undefined {
 	if (!record.path.endsWith('.dim')) {
 		return undefined;
 	}
 	for (const folder of workspaceFolders) {
-		const relative = relativePath(dimHookStorageDir(workspaceStorageHome, folder), record);
+		const relative = relativePath(dimHookStorageDir(folder), record);
 		if (relative === undefined || relative.length === 0 || relative.startsWith('..')) {
 			continue; // not under this folder's record directory
 		}
@@ -237,27 +268,29 @@ export function dimSourceFromRecordUri(workspaceStorageHome: URI, workspaceFolde
  * exists is left untouched, and a losing race to create one is ignored.
  *
  * Returns the record URI, or `undefined` when the file gets no record: it is not a
- * source-code file, it lives outside the workspace folder, or it is itself a record
- * under the storage root. Shared by the editor-open seeding and the view toggle so
- * that a restored editor on window load also gets its record, not only a fresh open.
+ * source-code file, it lives outside the workspace folder, or it is inside the
+ * records folder. Shared by the editor-open seeding and the view toggle so that a
+ * restored editor on window load also gets its record, not only a fresh open.
  *
  * @param fileService The file service used to probe for and create the record.
- * @param workspaceStorageHome The `workspaceStorageHome` from the environment service.
  * @param workspaceFolder The workspace folder the file belongs to.
  * @param file The workspace source file whose record should be ensured.
+ * @param ignoreInGit Whether git should ignore the records folder; applied when a
+ * record is seeded (see {@link syncDimRecordsGitignore}).
  */
-export async function seedDimRecord(fileService: IFileService, workspaceStorageHome: URI, workspaceFolder: URI, file: URI): Promise<URI | undefined> {
+export async function seedDimRecord(fileService: IFileService, workspaceFolder: URI, file: URI, ignoreInGit: boolean): Promise<URI | undefined> {
 	if (!isDimCodeFile(file)) {
 		return undefined; // only source-code files get a record
 	}
-	if (extUri.isEqualOrParent(file, workspaceStorageHome)) {
-		return undefined; // already under the storage root: never seed a record for a record
+	if (extUri.isEqualOrParent(file, dimHookStorageDir(workspaceFolder))) {
+		return undefined; // inside the records folder: never seed a record for a record
 	}
-	const record = dimHookRecordUri(workspaceStorageHome, workspaceFolder, file);
+	const record = dimHookRecordUri(workspaceFolder, file);
 	if (!record) {
 		return undefined; // the file is outside the workspace folder
 	}
 	if (!(await fileService.exists(record))) {
+		await syncDimRecordsGitignore(fileService, workspaceFolder, ignoreInGit);
 		// Seed an empty record (no diagrams): the file shows as raw source until the
 		// generator fills in a diagram chosen from its actual code, so no placeholder or
 		// default diagram is ever shown. The workspace-relative path is recorded so the

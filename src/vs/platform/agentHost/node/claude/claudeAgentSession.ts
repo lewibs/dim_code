@@ -206,14 +206,13 @@ export class ClaudeAgentSession extends Disposable {
 	private _workingDirectory: URI | undefined;
 
 	/**
-	 * Directory under the workspace-storage root where the bundled Dim `Stop`
-	 * hook writes per-file `.dim` change records for this session's workspace,
-	 * keeping them out of the repo. `undefined` when no folder is open, in which
-	 * case the hook records nothing.
+	 * The workspace's `.dim` records folder, where the bundled Dim `Stop` hook
+	 * writes per-file `.dim` change records for this session's workspace.
+	 * `undefined` when no folder is open, in which case the hook records nothing.
 	 */
 	private get _dimHookStorageDir(): URI | undefined {
 		const cwd = this.workingDirectory;
-		return cwd ? dimHookStorageDir(this._environmentService.workspaceStorageHome, cwd) : undefined;
+		return cwd ? dimHookStorageDir(cwd) : undefined;
 	}
 
 	/**

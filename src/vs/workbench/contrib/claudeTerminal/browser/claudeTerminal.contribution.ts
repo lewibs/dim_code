@@ -163,11 +163,11 @@ class ClaudeTerminalViewPane extends ViewPane {
 				version: '0.0.0',
 				skills: ['./skills/']
 			};
-			// Per-file `.dim` change records go to the workspace-storage bucket for
-			// the open folder (kept out of the repo), matching where Dim's native
-			// agent sessions write them. Omitted when no folder is open.
+			// Per-file `.dim` change records go to the open folder's `.dim` records
+			// folder, matching where Dim's native agent sessions write them. Omitted
+			// when no folder is open.
 			const workspaceFolder = this._contextService.getWorkspace().folders.at(0)?.uri;
-			const dimStorageDir = workspaceFolder ? dimHookStorageDir(this._environmentService.workspaceStorageHome, workspaceFolder).fsPath : undefined;
+			const dimStorageDir = workspaceFolder ? dimHookStorageDir(workspaceFolder).fsPath : undefined;
 			const hookCommand = dimStorageDir
 				? `DIM_DIM_DIR="${dimStorageDir}" sh "\${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"`
 				: 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"';

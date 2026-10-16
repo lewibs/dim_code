@@ -12,24 +12,23 @@ import { FileService } from '../../../files/common/fileService.js';
 import { IFileService } from '../../../files/common/files.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, seedDimRecord, serializeDimRecord, isDimCodeFile } from '../../common/dimHookStorage.js';
+import { dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, seedDimRecord, serializeDimRecord, isDimCodeFile, syncDimRecordsGitignore } from '../../common/dimHookStorage.js';
 import { DimDiagramType } from '../../common/dimDiagramTypes.js';
 
 suite('dimHookStorage', () => {
 
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	const storageHome = URI.file('/home/u/.config/dim-dev/User/workspaceStorage');
 	const folder = URI.file('/home/u/project');
 
-	test('dimHookRecordUri mirrors workspace-relative paths under the storage bucket', () => {
-		const dir = dimHookStorageDir(storageHome, folder);
+	test('dimHookRecordUri mirrors workspace-relative paths under the workspace .dim folder', () => {
+		const dir = dimHookStorageDir(folder);
 
 		assert.deepStrictEqual({
-			rootFile: dimHookRecordUri(storageHome, folder, URI.file('/home/u/project/foo.ts'))?.toString(),
-			nestedFile: dimHookRecordUri(storageHome, folder, URI.file('/home/u/project/src/a/b.ts'))?.toString(),
-			outsideFolder: dimHookRecordUri(storageHome, folder, URI.file('/home/u/other/x.ts')),
-			folderItself: dimHookRecordUri(storageHome, folder, folder),
+			rootFile: dimHookRecordUri(folder, URI.file('/home/u/project/foo.ts'))?.toString(),
+			nestedFile: dimHookRecordUri(folder, URI.file('/home/u/project/src/a/b.ts'))?.toString(),
+			outsideFolder: dimHookRecordUri(folder, URI.file('/home/u/other/x.ts')),
+			folderItself: dimHookRecordUri(folder, folder),
 		}, {
 			rootFile: joinPath(dir, 'foo.ts.dim').toString(),
 			nestedFile: joinPath(dir, 'src/a/b.ts.dim').toString(),
@@ -63,19 +62,19 @@ suite('dimHookStorage', () => {
 	test('dimSourceFromRecordUri reverses dimHookRecordUri and rejects non-records', () => {
 		const rootFile = URI.file('/home/u/project/foo.ts');
 		const nestedFile = URI.file('/home/u/project/src/a/b.ts');
-		const rootRecord = dimHookRecordUri(storageHome, folder, rootFile)!;
-		const nestedRecord = dimHookRecordUri(storageHome, folder, nestedFile)!;
+		const rootRecord = dimHookRecordUri(folder, rootFile)!;
+		const nestedRecord = dimHookRecordUri(folder, nestedFile)!;
 
 		assert.deepStrictEqual({
-			rootRoundTrip: dimSourceFromRecordUri(storageHome, [folder], rootRecord)?.toString(),
-			nestedRoundTrip: dimSourceFromRecordUri(storageHome, [folder], nestedRecord)?.toString(),
-			notARecord: dimSourceFromRecordUri(storageHome, [folder], rootFile),
-			outsideStorage: dimSourceFromRecordUri(storageHome, [folder], URI.file('/home/u/project/foo.ts.dim')),
+			rootRoundTrip: dimSourceFromRecordUri([folder], rootRecord)?.toString(),
+			nestedRoundTrip: dimSourceFromRecordUri([folder], nestedRecord)?.toString(),
+			notARecord: dimSourceFromRecordUri([folder], rootFile),
+			outsideRecordsFolder: dimSourceFromRecordUri([folder], URI.file('/home/u/project/foo.ts.dim')),
 		}, {
 			rootRoundTrip: rootFile.toString(),
 			nestedRoundTrip: nestedFile.toString(),
 			notARecord: undefined,
-			outsideStorage: undefined,
+			outsideRecordsFolder: undefined,
 		});
 	});
 
@@ -90,7 +89,7 @@ suite('dimHookStorage', () => {
 
 		test('creates an empty record for a source file, carrying its relative source path', async () => {
 			const file = URI.file('/home/u/project/src/a.ts');
-			const record = await seedDimRecord(fileService, storageHome, folder, file);
+			const record = await seedDimRecord(fileService, folder, file, true);
 			const content = record && (await fileService.readFile(record)).value.toString();
 
 			// No placeholder or default diagram is seeded: the file shows as raw source
@@ -99,18 +98,18 @@ suite('dimHookStorage', () => {
 				record: record?.toString(),
 				content,
 			}, {
-				record: dimHookRecordUri(storageHome, folder, file)!.toString(),
+				record: dimHookRecordUri(folder, file)!.toString(),
 				content: serializeDimRecord([], 'src/a.ts'),
 			});
 		});
 
 		test('leaves an existing record untouched', async () => {
 			const file = URI.file('/home/u/project/src/a.ts');
-			const record = dimHookRecordUri(storageHome, folder, file)!;
+			const record = dimHookRecordUri(folder, file)!;
 			const original = serializeDimRecord([{ type: DimDiagramType.Flowchart, label: 'Kept', mermaid: 'graph TD; A-->B' }], 'src/a.ts');
 			await fileService.createFile(record, VSBuffer.fromString(original));
 
-			const returned = await seedDimRecord(fileService, storageHome, folder, file);
+			const returned = await seedDimRecord(fileService, folder, file, true);
 
 			assert.deepStrictEqual({
 				returned: returned?.toString(),
@@ -124,18 +123,49 @@ suite('dimHookStorage', () => {
 		test('returns undefined without writing for files that get no record', async () => {
 			const doc = URI.file('/home/u/project/README.md');
 			const outside = URI.file('/home/u/other/x.ts');
-			const aRecord = joinPath(dimHookStorageDir(storageHome, folder), 'foo.ts.dim');
+			const aRecord = joinPath(dimHookStorageDir(folder), 'foo.ts.dim');
 
 			assert.deepStrictEqual({
-				doc: await seedDimRecord(fileService, storageHome, folder, doc),
-				outside: await seedDimRecord(fileService, storageHome, folder, outside),
-				record: await seedDimRecord(fileService, storageHome, folder, aRecord),
-				wroteNothing: await fileService.exists(dimHookStorageDir(storageHome, folder)),
+				doc: await seedDimRecord(fileService, folder, doc, true),
+				outside: await seedDimRecord(fileService, folder, outside, true),
+				record: await seedDimRecord(fileService, folder, aRecord, true),
+				wroteNothing: await fileService.exists(dimHookStorageDir(folder)),
 			}, {
 				doc: undefined,
 				outside: undefined,
 				record: undefined,
 				wroteNothing: false,
+			});
+		});
+
+		test('keeps the records folder .gitignore in line with the setting', async () => {
+			const gitignore = joinPath(dimHookStorageDir(folder), '.gitignore');
+			await seedDimRecord(fileService, folder, URI.file('/home/u/project/src/a.ts'), true);
+			const written = (await fileService.readFile(gitignore)).value.toString();
+			const createdWhenIgnored = await fileService.exists(gitignore);
+
+			await syncDimRecordsGitignore(fileService, folder, false);
+			const removedWhenCommitted = !(await fileService.exists(gitignore));
+
+			await seedDimRecord(fileService, folder, URI.file('/home/u/project/src/b.ts'), false);
+			const notRecreatedBySeed = !(await fileService.exists(gitignore));
+
+			await syncDimRecordsGitignore(fileService, folder, true);
+
+			assert.deepStrictEqual({
+				dir: dimHookStorageDir(folder).toString(),
+				ignoresEverything: written.split('\n').includes('*'),
+				createdWhenIgnored,
+				removedWhenCommitted,
+				notRecreatedBySeed,
+				restoredWhenIgnoredAgain: await fileService.exists(gitignore),
+			}, {
+				dir: URI.file('/home/u/project/.dim').toString(),
+				ignoresEverything: true,
+				createdWhenIgnored: true,
+				removedWhenCommitted: true,
+				notRecreatedBySeed: true,
+				restoredWhenIgnoredAgain: true,
 			});
 		});
 	});

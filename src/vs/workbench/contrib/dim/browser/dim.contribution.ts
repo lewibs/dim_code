@@ -10,14 +10,16 @@ import { relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
-import { DIM_EDITOR_VIEW_TYPE, IDimDiagram, isDimCodeFile, parseDimRecord, seedDimRecord } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimCodeFile, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { Extensions as ConfigurationExtensions, ConfigurationScope, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
+import { Registry } from '../../../../platform/registry/common/platform.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { DEFAULT_EDITOR_ASSOCIATION } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
-import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IDimDiagramViewOption, IDimDiagramViewService } from '../../../services/dimDiagram/common/dimDiagramView.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
@@ -28,6 +30,27 @@ import { IEditorGroupsService } from '../../../services/editor/common/editorGrou
  * calls it with the source file's URI and the diagram type to reveal.
  */
 const SHOW_DIAGRAM_COMMAND = '_dim.showDiagram';
+
+/**
+ * Whether git ignores Dim's diagram records, via a `.gitignore` that Dim keeps in each
+ * workspace's `.dim` folder. Turning it off removes that file so the records can be
+ * committed with the code.
+ */
+const DIM_DIAGRAMS_GITIGNORE_SETTING = 'dim.diagrams.gitignore';
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	id: 'dim',
+	title: localize('dimConfigurationTitle', "Dim"),
+	type: 'object',
+	properties: {
+		[DIM_DIAGRAMS_GITIGNORE_SETTING]: {
+			type: 'boolean',
+			default: true,
+			scope: ConfigurationScope.RESOURCE,
+			markdownDescription: localize('dim.diagrams.gitignore', "Keep a `.gitignore` in the workspace's `.dim` folder so git ignores Dim's diagrams and overviews. Turn this off to delete that file and commit them with your code."),
+		},
+	},
+});
 
 /**
  * Command the Dim diagram viewer calls to map a source file URI to its companion
@@ -150,8 +173,8 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly _contextService: IWorkspaceContextService,
-		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
 		@ICommandService private readonly _commandService: ICommandService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 	) {
 		super();
 
@@ -168,6 +191,36 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 
 		this._register(this._editorService.onDidActiveEditorChange(() => this._update()));
 		this._update();
+
+		// Keep each records folder's `.gitignore` in line with the setting: on startup,
+		// when the setting changes, and for newly added workspace folders.
+		this._register(this._configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(DIM_DIAGRAMS_GITIGNORE_SETTING)) {
+				this._syncRecordsGitignore(this._contextService.getWorkspace().folders.map(folder => folder.uri));
+			}
+		}));
+		this._register(this._contextService.onDidChangeWorkspaceFolders(e => this._syncRecordsGitignore(e.added.map(folder => folder.uri))));
+		this._syncRecordsGitignore(this._contextService.getWorkspace().folders.map(folder => folder.uri));
+	}
+
+	/** Whether {@link DIM_DIAGRAMS_GITIGNORE_SETTING} asks git to ignore a workspace folder's records. */
+	private _ignoreRecordsInGit(workspaceFolder: URI): boolean {
+		return this._configurationService.getValue<boolean>(DIM_DIAGRAMS_GITIGNORE_SETTING, { resource: workspaceFolder }) !== false;
+	}
+
+	/**
+	 * Adds or removes the `.gitignore` in the given workspace folders' records folders to
+	 * match {@link DIM_DIAGRAMS_GITIGNORE_SETTING}. Folders with no records folder yet are
+	 * skipped; seeding the first record applies the setting there.
+	 */
+	private _syncRecordsGitignore(workspaceFolders: readonly URI[]): void {
+		for (const folder of workspaceFolders) {
+			void (async () => {
+				if (await this._fileService.exists(dimHookStorageDir(folder))) {
+					await syncDimRecordsGitignore(this._fileService, folder, this._ignoreRecordsInGit(folder));
+				}
+			})();
+		}
 	}
 
 	/** Reads a text file's contents, or `undefined` when it does not exist / cannot be read. */
@@ -192,7 +245,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		if (!folder || !isDimCodeFile(sourceUri)) {
 			return undefined;
 		}
-		const recordUri = await seedDimRecord(this._fileService, this._environmentService.workspaceStorageHome, folder.uri, sourceUri);
+		const recordUri = await seedDimRecord(this._fileService, folder.uri, sourceUri, this._ignoreRecordsInGit(folder.uri));
 		if (recordUri) {
 			// Bring the record up to date for this file's current code (no-op when it is
 			// already current). Fire-and-forget: the empty record is already in place, the
