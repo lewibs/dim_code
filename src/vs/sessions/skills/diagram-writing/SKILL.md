@@ -17,7 +17,7 @@ These are the kinds you can choose from, and the code entity each one is for. Ea
 | Code entity | Diagram | Mermaid keyword | Label | Skill |
 |---|---|---|---|---|
 | Class, service, subsystem, feature, whole app — or a module that is just standalone functions + interfaces | UML structure diagram: types, members and relationships (for a function-module, the interfaces + functions with "who calls whom" edges — not a flowchart) | classDiagram | Structure | structure.md |
-| Function, method, API or endpoint that calls two or more collaborators, or an event / message flow | Sequence diagram: who calls whom, in order, across participants | sequenceDiagram | Behavior | behavior.md |
+| Function, method, API or endpoint that calls two or more collaborators, or an event / message flow | Sequence diagram: who calls whom, in order, across participants | sequenceDiagram | Sequence | sequence.md |
 | A single function or method whose own branching / looping control flow is the point | Flowchart: guards, branches and loops within one routine | flowchart | Logic | logic.md |
 | A class's stateful parameter — a field/property whose value moves through a fixed set of modes — or code that models a lifecycle / state machine (a session, a connection, a picker) | State diagram: the modes and the transitions between them | stateDiagram | States | states.md |
 | A relational / SQL-shaped schema or data model | Entity-relationship diagram: entities and their relationships | erDiagram | Data | data.md |
@@ -69,7 +69,7 @@ Every box and every line of text in a Dim diagram is clickable. A click opens th
 When the request names a **focus**, document only that one symbol of the file, not the whole file. The readme describes just that symbol.
 
 - **attribute**: draw exactly one `stateDiagram`. Show the values or modes the attribute moves through, and label each transition with the method that moves it (`Idle --> Running : start()`). If its values are open-ended rather than a fixed set of modes, show the lifecycle it does have: unset, set and cleared, and who sets it.
-- **function**: draw the view that explains that one routine. Use a Logic `flowchart` when its branching is the point, a Behavior `sequenceDiagram` when it orchestrates collaborators, or both when both earn their place.
+- **function**: draw the view that explains that one routine. Use a Logic `flowchart` when its branching is the point, a Sequence `sequenceDiagram` when it orchestrates collaborators, or both when both earn their place.
 - **class**: draw a Structure `classDiagram` of that class and its direct collaborators.
 
 A focused view still links everything it draws.

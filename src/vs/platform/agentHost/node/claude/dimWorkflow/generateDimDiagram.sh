@@ -287,7 +287,7 @@ fi
 if [ -z "$skillGeneral" ]; then
 	# Degraded fallback when the skill files are missing (e.g. a stale plugin install):
 	# describe the kinds inline so the model can still pick a sensible view.
-	skillGeneral="Choose from these kinds (mermaid keyword = label): classDiagram = Structure, sequenceDiagram = Behavior, flowchart = Logic, stateDiagram = States, erDiagram = Data. Pick only the views that earn their place: one is usually right, a second only when it shows something the first cannot. Do NOT pad with a diagram that merely restates the overview. When the file is standalone functions + interfaces, prefer a Structure view of the whole module (its interfaces + functions with call edges), not a flowchart of one function. Base every diagram on THIS code using its real identifiers, and populate referenced types from the imported definitions instead of leaving empty boxes."
+	skillGeneral="Choose from these kinds (mermaid keyword = label): classDiagram = Structure, sequenceDiagram = Sequence, flowchart = Logic, stateDiagram = States, erDiagram = Data. Pick only the views that earn their place: one is usually right, a second only when it shows something the first cannot. Do NOT pad with a diagram that merely restates the overview. When the file is standalone functions + interfaces, prefer a Structure view of the whole module (its interfaces + functions with call edges), not a flowchart of one function. Base every diagram on THIS code using its real identifiers, and populate referenced types from the imported definitions instead of leaving empty boxes."
 fi
 
 # Parse the kinds table in SKILL.md for the allowed-label list and to pull in each kind's
@@ -420,7 +420,7 @@ Output rules:
 - "diagrams" holds only the views that genuinely help (often just one), each a distinct type; never add a type just to have more.
 - Each diagram has a "links" list that maps every box, member, participant and message it draws to the code it stands for, as the skill's links section describes. "file" is the workspace-relative path: "$REL" for this file's own symbols, and the "file:" path shown for each imported definition.
 - Output ONLY a JSON object, no markdown fences and no prose outside it, shaped EXACTLY like (note the leading "{"):
-  {"readme":"..."${testsShape},"diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"$REL"}]${changesShape}},{"type":"sequenceDiagram","label":"Behavior","mermaid":"sequenceDiagram\n ...","links":[]}]}
+  {"readme":"..."${testsShape},"diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"$REL"}]${changesShape}},{"type":"sequenceDiagram","label":"Sequence","mermaid":"sequenceDiagram\n ...","links":[]}]}
 ${focusBlock}${testsBlock}${changesBlock}
 File: $REL
 --- BEGIN CODE ---

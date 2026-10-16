@@ -13,7 +13,7 @@
 - Edges: `A --> B`; label a branch with `B -->|yes| C` and `B -->|no| D`.
 - Keep loops explicit — route an edge back to the loop head.
 
-**Avoid:** flowcharting a function that just calls collaborators in sequence (that is Behavior), and restating the whole module's structure (that is Structure).
+**Avoid:** flowcharting a function that just calls collaborators in sequence (that is a Sequence), and restating the whole module's structure (that is Structure).
 
 **Showing changes** (see "Showing changes" in the main skill):
 - A new or edited step or decision is marked by its node's displayed text (its label, not its id). Use a label for each node rather than a bare id, so it can be named.

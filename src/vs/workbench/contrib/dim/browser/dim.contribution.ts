@@ -123,7 +123,7 @@ const dimDiagramTypeOrder: readonly DimDiagramType[] = dimDiagramTypes;
 function dimViewTitle(type: DimDiagramType): string {
 	switch (type) {
 		case DimDiagramType.Class: return localize('dim.view.structure', "Structure");
-		case DimDiagramType.Sequence: return localize('dim.view.behavior', "Behavior");
+		case DimDiagramType.Sequence: return localize('dim.view.sequence', "Sequence");
 		case DimDiagramType.Flowchart: return localize('dim.view.logic', "Logic");
 		case DimDiagramType.StatefulParameter: return localize('dim.view.states', "States");
 		case DimDiagramType.Entity: return localize('dim.view.data', "Data");
@@ -170,7 +170,7 @@ const dimViewCommands = [
 	{ id: README_COMMAND_ID, title: localize2('dim.showReadme', "Show README") },
 	{ id: RAW_COMMAND_ID, title: localize2('dim.showRaw', "Show Raw") },
 	{ id: diagramCommandId(DimDiagramType.Class), title: localize2('dim.showStructure', "Show Structure") },
-	{ id: diagramCommandId(DimDiagramType.Sequence), title: localize2('dim.showBehavior', "Show Behavior") },
+	{ id: diagramCommandId(DimDiagramType.Sequence), title: localize2('dim.showSequence', "Show Sequence") },
 	{ id: diagramCommandId(DimDiagramType.Flowchart), title: localize2('dim.showLogic', "Show Logic") },
 	{ id: diagramCommandId(DimDiagramType.StatefulParameter), title: localize2('dim.showStates', "Show States") },
 	{ id: diagramCommandId(DimDiagramType.Entity), title: localize2('dim.showData', "Show Data") },

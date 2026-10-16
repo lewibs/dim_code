@@ -47,7 +47,7 @@ The file is JSON, the same format as a per-file record, without `source` or `sou
 	"diagrams": [
 		{
 			"type": "sequenceDiagram",
-			"label": "Behavior",
+			"label": "Sequence",
 			"mermaid": "sequenceDiagram\n  participant View as ChatView\n  participant Service as ChatService\n  View->>Service: sendRequest(message)\n  …",
 			"links": [
 				{ "label": "View", "symbol": "ChatView", "kind": "class", "file": "src/vs/workbench/contrib/chat/browser/chatView.ts" },
@@ -60,7 +60,7 @@ The file is JSON, the same format as a per-file record, without `source` or `sou
 ```
 
 - **`readme`**: plain text, not Markdown. It's shown as written, with line breaks kept. Say what question the record answers and what each diagram shows. Then walk through the flow or structure in a few short paragraphs, naming the real classes and functions. End with a "Files:" list of the workspace-relative paths involved, one per line, each with a few words on its role.
-- **`diagrams`**: as many as genuinely help, usually one or two. Each needs a `type` (one of `classDiagram`, `sequenceDiagram`, `flowchart`, `stateDiagram`, `erDiagram`), a `label` (`Structure`, `Behavior`, `Logic`, `States` or `Data`, matching the type), and `mermaid` source. Pick the kind and draw it following the `diagram-writing` skill and its per-kind files. Use the code's real identifiers.
+- **`diagrams`**: as many as genuinely help, usually one or two. Each needs a `type` (one of `classDiagram`, `sequenceDiagram`, `flowchart`, `stateDiagram`, `erDiagram`), a `label` (`Structure`, `Sequence`, `Logic`, `States` or `Data`, matching the type), and `mermaid` source. Pick the kind and draw it following the `diagram-writing` skill and its per-kind files. Use the code's real identifiers.
 - **`links`**: these are what make the diagram useful across files. Add an entry for every box, participant and call drawn, each with its workspace-relative `file`, so a click opens that file's own Dim view. `kind` is `class`, `function`, `attribute` or `file` (use `file` for a box that stands for a whole module). A link can also name the `view` it opens on (`readme`, a diagram type, or `raw`) and, with `line` and `endLine`, the exact lines it points at, which open raw with those lines selected. See the `diagram-writing` skill's links section.
 
 Read the code before you draw. Every name in the diagram must exist, and every `file` must be a real path. Check that the JSON is valid (for example with `python3 -m json.tool <file>`) before opening it.

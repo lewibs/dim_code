@@ -73,7 +73,7 @@ export function inferDimDiagramType(mermaid: string): DimDiagramType {
 export function dimDiagramLabel(type: string): string {
 	switch (type) {
 		case DimDiagramType.Class: return "Structure";
-		case DimDiagramType.Sequence: return "Behavior";
+		case DimDiagramType.Sequence: return "Sequence";
 		case DimDiagramType.Flowchart: return "Logic";
 		case DimDiagramType.StatefulParameter: return "States";
 		case DimDiagramType.Entity: return "Data";

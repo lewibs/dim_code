@@ -1,4 +1,4 @@
-# Behavior — sequenceDiagram
+# Sequence — sequenceDiagram
 
 **Reach for it when** a function, method, API or endpoint calls two or more collaborators, or the file models an event / message flow. It answers "what talks to what, and in what order".
 
@@ -13,7 +13,7 @@
 - Calls: `A->>B: request()` (solid, a call); start the message with the real name of the method called, so the message can be linked to it, `B-->>A: result` (dashed, a return). Use `A-)B: event` for async/fire-and-forget.
 - Group with `alt Condition ... else ... end`, `opt Condition ... end`, `loop Each item ... end`.
 
-**Avoid:** inventing participants the code doesn't have, and turning a single routine's internal branching into a sequence — that branching is Logic (a flowchart), not Behavior.
+**Avoid:** inventing participants the code doesn't have, and turning a single routine's internal branching into a sequence — that branching is Logic (a flowchart), not a Sequence.
 
 **Showing changes** (see "Showing changes" in the main skill):
 - A new or edited call is marked by its message's call (`save` for `A->>B: save(record)`), and a new or deleted participant by its displayed name.

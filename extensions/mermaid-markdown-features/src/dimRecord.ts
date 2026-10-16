@@ -155,7 +155,7 @@ const knownTypes: readonly string[] = ['classDiagram', 'sequenceDiagram', 'flowc
 function labelForType(type: string): string {
 	switch (type) {
 		case 'classDiagram': return 'Structure';
-		case 'sequenceDiagram': return 'Behavior';
+		case 'sequenceDiagram': return 'Sequence';
 		case 'flowchart': return 'Logic';
 		case 'stateDiagram': return 'States';
 		case 'erDiagram': return 'Data';
