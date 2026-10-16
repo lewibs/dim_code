@@ -77,10 +77,11 @@ interface IDimView {
 
 /**
  * Dim: renders a source file's companion `.dim` record as a full-viewport mermaid
- * diagram. The editor is registered (at `option` priority) for the same source-code
- * resources as the normal text editor, so both views share one tab, path and
- * breadcrumb — exactly like Markdown's text/preview pair. The record itself is a
- * sidecar in the workspace `.dim` folder and is never opened as an editor; this
+ * diagram. The editor is registered (at `default` priority, so code files open in it,
+ * on the README view) for the same source-code resources as the normal text editor, so
+ * both views share one tab, path and breadcrumb — exactly like Markdown's text/preview
+ * pair. The record itself is a sidecar in the workspace `.dim` folder and is never
+ * opened as an editor; this
  * provider looks it up via {@link resolveRecordCommand} and reads it directly.
  *
  * The native Dim view toggle in the editor title bar switches a slot between the

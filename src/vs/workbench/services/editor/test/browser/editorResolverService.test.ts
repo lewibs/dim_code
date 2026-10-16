@@ -140,6 +140,41 @@ suite('EditorResolverService', () => {
 		registeredEditor.dispose();
 	});
 
+	test('An open that targets a text selection resolves to the text editor over a default-priority editor', async () => {
+		const [part, service] = await createEditorResolverService();
+		const TEXT_INPUT_ID = 'testTextInput';
+		disposables.add(service.registerEditor('*', {
+			id: DEFAULT_EDITOR_ASSOCIATION.id,
+			label: DEFAULT_EDITOR_ASSOCIATION.displayName,
+			priority: RegisteredEditorPriority.builtin
+		}, {}, {
+			createEditorInput: ({ resource }) => ({ editor: constructDisposableFileEditorInput(resource, TEXT_INPUT_ID, disposables) }),
+		}));
+		disposables.add(service.registerEditor('*.test', {
+			id: 'TEST_EDITOR',
+			label: 'Test Editor Label',
+			priority: RegisteredEditorPriority.default
+		}, {}, {
+			createEditorInput: ({ resource }) => ({ editor: constructDisposableFileEditorInput(resource, TEST_EDITOR_INPUT_ID, disposables) }),
+		}));
+		const resource = URI.file('resource-selection.test');
+		const selection = { startLineNumber: 3, startColumn: 1 };
+		const typeIdOf = async (options?: { readonly selection?: typeof selection; readonly override?: string }) => {
+			const resolution = await service.resolveEditor({ resource, options }, part.activeGroup);
+			return typeof resolution === 'number' ? resolution : resolution.editor.typeId;
+		};
+
+		assert.deepStrictEqual({
+			plain: await typeIdOf(),
+			withSelection: await typeIdOf({ selection }),
+			withSelectionAndOverride: await typeIdOf({ selection, override: 'TEST_EDITOR' }),
+		}, {
+			plain: TEST_EDITOR_INPUT_ID,
+			withSelection: TEXT_INPUT_ID,
+			withSelectionAndOverride: TEST_EDITOR_INPUT_ID,
+		});
+	});
+
 	test('singlePerResource finds editors by preferred resource', async () => {
 		const [part, service] = await createEditorResolverService();
 		const resource = URI.file('/workspace/index.test');

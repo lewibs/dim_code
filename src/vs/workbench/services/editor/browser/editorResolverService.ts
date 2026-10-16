@@ -12,7 +12,7 @@ import { basename, extname } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { EditorActivation, EditorResolution, IEditorOptions } from '../../../../platform/editor/common/editor.js';
+import { EditorActivation, EditorResolution, IEditorOptions, ITextEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
@@ -181,7 +181,18 @@ export class EditorResolverService extends Disposable implements IEditorResolver
 		}
 
 		// Resolved the editor ID as much as possible, now find a given editor (cast here is ok because we resolve down to a string above)
-		let { editor: selectedEditor, conflictingDefault } = this.getEditor(resource, untypedEditor.options?.override as (string | EditorResolution.EXCLUSIVE_ONLY | undefined), editorAssociationType);
+		let { editor: selectedEditor, conflictingDefault, source: selectionSource } = this.getEditor(resource, untypedEditor.options?.override as (string | EditorResolution.EXCLUSIVE_ONLY | undefined), editorAssociationType);
+		// An open that targets a text selection (go to definition, a search result, a
+		// problem) needs the text editor to reveal it. An editor that is only the default
+		// by its priority, such as a custom editor for the same files, cannot, so the
+		// text editor takes it, unless the user associated that editor with the files.
+		if (selectionSource === EditorSelectionSource.EditorPriority && editorAssociationType === EditorAssociationType.Editor && (untypedEditor.options as ITextEditorOptions | undefined)?.selection) {
+			const textEditor = this.getEditor(resource, DEFAULT_EDITOR_ASSOCIATION.id, editorAssociationType);
+			if (textEditor.editor) {
+				selectedEditor = textEditor.editor;
+				conflictingDefault = false;
+			}
+		}
 		// If no editor was found and this was a typed editor or an editor with an explicit override we could not resolve it
 		if (!selectedEditor && (untypedEditor.options?.override || isEditorInputWithOptions(editor))) {
 			return ResolvedStatus.NONE;

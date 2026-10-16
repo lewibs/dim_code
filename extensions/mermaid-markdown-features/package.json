@@ -44,7 +44,7 @@
             "filenamePattern": "**/.dim/big_picture/**/*.dim"
           }
         ],
-        "priority": "option"
+        "priority": "default"
       }
     ],
     "commands": [

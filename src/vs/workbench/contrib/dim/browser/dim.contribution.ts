@@ -140,10 +140,11 @@ interface IDimEditorContext {
 }
 
 /**
- * Drives Dim view switching. A source file opens as a normal, editable editor; the
- * Dim diagram viewer is a second editor (`option` priority) registered for the *same*
- * source resource, so both share one tab, path and breadcrumb — just like Markdown's
- * text/preview pair. This service reads the file's companion `.dim` record, registers
+ * Drives Dim view switching. A source file opens in the Dim diagram viewer, on its
+ * README view; the viewer is registered (`default` priority) for the *same* source
+ * resource as the normal, editable text editor (which an open targeting a line, such
+ * as go to definition, still gets), so both share one tab, path and breadcrumb — just
+ * like Markdown's text/preview pair. This service reads the file's companion `.dim` record, registers
  * the commands that switch the same editor slot between the text editor and each
  * diagram, and exposes {@link getViewOptions} so the breadcrumb editor-type picker can
  * list the available views as a dropdown.
@@ -376,6 +377,18 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		const seq = ++this._updateSeq;
 		const activeEditor = this._editorService.activeEditor;
 		const ref = this._ref(activeEditor);
+
+		// The diagram viewer is the default editor for every code file, but only files Dim
+		// supports (code files in the workspace, and big-picture records) have a record to
+		// show. Any other file the viewer opened goes back to the text editor in place.
+		if (!ref && activeEditor?.editorId === DIM_EDITOR_VIEW_TYPE && activeEditor.resource) {
+			const group = this._editorGroupsService.activeGroup;
+			await this._editorService.replaceEditors([{
+				editor: activeEditor,
+				replacement: { resource: activeEditor.resource.with({ fragment: '' }), options: { override: DEFAULT_EDITOR_ASSOCIATION.id, pinned: group.isPinned(activeEditor) } }
+			}], group);
+			return;
+		}
 
 		// Refresh the picker synchronously so the Raw and README views (always available
 		// for a code file) show immediately, rather than waiting on the async record read
