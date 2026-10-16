@@ -387,10 +387,9 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		const key = ref.sourceUri.toString();
 		const diagrams = this._diagramsBySource.get(key) ?? [];
 		// When the diagram viewer is showing, the default view mirrors the viewer's own:
-		// the first diagram if the record has one, else the always-present README overview.
-		const defaultView: string = diagrams.length > 0 ? diagrams[0].type : README_VIEW_ID;
+		// the always-present README overview, unless another view was selected earlier.
 		const current: string = ref.recordActive
-			? (this._selectedBySource.get(key) ?? defaultView)
+			? (this._selectedBySource.get(key) ?? README_VIEW_ID)
 			: 'raw';
 		// Raw first (the editable source), then the README overview (always available),
 		// then one entry per diagram the record holds.

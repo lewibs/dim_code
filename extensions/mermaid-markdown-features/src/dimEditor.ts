@@ -161,12 +161,11 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			render: async () => {
 				view.views = recordUri ? await loadViews(recordUri) : [buildReadmeView(undefined)];
 				// Show the type last selected for this source file (restored across hide/show
-				// and preserved across live re-renders); otherwise default to the first diagram
-				// if the record has one, else the always-present README overview.
+				// and preserved across live re-renders); otherwise open on the always-present
+				// README overview, which is first.
 				const selectedType = this._selected.get(key);
 				const selectedIndex = selectedType ? view.views.findIndex(v => v.type === selectedType) : -1;
-				const defaultIndex = view.views.length > 1 ? 1 : 0;
-				view.index = selectedIndex >= 0 ? selectedIndex : defaultIndex;
+				view.index = selectedIndex >= 0 ? selectedIndex : 0;
 				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index, /*clickable*/ true, this._statusBanner(key, view));
 			}
 		};
