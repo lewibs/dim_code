@@ -219,22 +219,14 @@ class ClaudeTerminalViewPane extends ViewPane {
 			const stopHookEnabled = false;
 			const hooks = {
 				description: 'Dim built-in hooks',
-				hooks: {
-					...(stopHookEnabled ? {
-						// Fire once when the agent finishes its turn (end of its response),
-						// rather than before every tool call.
-						Stop: [{
-							matcher: '',
-							hooks: [{ type: 'command', command: hookCommand }]
-						}]
-					} : {}),
-					// Plan mode: block file edits in the workspace while a plan record is still
-					// being planned (see the plan-mode skill).
-					PreToolUse: [{
-						matcher: 'Edit|MultiEdit|Write|NotebookEdit',
-						hooks: [{ type: 'command', command: 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/planGate.sh"' }]
+				hooks: stopHookEnabled ? {
+					// Fire once when the agent finishes its turn (end of its response),
+					// rather than before every tool call.
+					Stop: [{
+						matcher: '',
+						hooks: [{ type: 'command', command: hookCommand }]
 					}]
-				}
+				} : {}
 			};
 			await this._fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
 			await this._fileService.writeFile(joinPath(hooksDir, 'hooks.json'), VSBuffer.fromString(JSON.stringify(hooks, null, '\t')));
@@ -247,15 +239,13 @@ class ClaudeTerminalViewPane extends ViewPane {
 			const generatorSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/generateDimDiagram.sh');
 			await this._fileService.writeFile(joinPath(hooksDir, 'updateDimHook.sh'), (await this._fileService.readFile(hookSource)).value);
 			await this._fileService.writeFile(joinPath(hooksDir, 'generateDimDiagram.sh'), (await this._fileService.readFile(generatorSource)).value);
-			const planGateSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/planGate.sh');
-			await this._fileService.writeFile(joinPath(hooksDir, 'planGate.sh'), (await this._fileService.readFile(planGateSource)).value);
 
 			// Copy each terminal skill's markdown files whole. For diagram-writing that is the
 			// general SKILL.md (which holds the method and the catalog of kinds the generator
 			// reads) plus every per-kind diagram skill (one markdown file per kind). The
 			// generator resolves these from `../skills/diagram-writing/` relative to its hooks
 			// folder and injects the matching kind's instructions into its prompt.
-			for (const skillName of ['diagram-writing', 'open-files', 'big-picture', 'plan-mode']) {
+			for (const skillName of ['diagram-writing', 'open-files', 'big-picture']) {
 				const skillDir = joinPath(root, 'skills', skillName);
 				await this._fileService.createFolder(skillDir);
 				const skillEntries = await this._fileService.resolve(FileAccess.asFileUri(`vs/sessions/skills/${skillName}`));
