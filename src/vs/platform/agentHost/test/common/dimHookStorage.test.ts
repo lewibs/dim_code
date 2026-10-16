@@ -12,7 +12,7 @@ import { FileService } from '../../../files/common/fileService.js';
 import { IFileService } from '../../../files/common/files.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, parseDimFocus, seedDimRecord, serializeDimRecord, isDimCodeFile, syncDimRecordsGitignore } from '../../common/dimHookStorage.js';
+import { dimBigPictureDir, dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, isDimBigPictureRecord, parseDimFocus, seedDimRecord, serializeDimRecord, isDimCodeFile, syncDimRecordsGitignore } from '../../common/dimHookStorage.js';
 import { DimDiagramType } from '../../common/dimDiagramTypes.js';
 
 suite('dimHookStorage', () => {
@@ -97,6 +97,28 @@ suite('dimHookStorage', () => {
 			nestedRoundTrip: nestedFile.toString(),
 			notARecord: undefined,
 			outsideRecordsFolder: undefined,
+		});
+	});
+
+	test('big-picture records live in .dim/big_picture and map back to no source file', () => {
+		const record = joinPath(dimBigPictureDir(folder), 'request-flow.dim');
+
+		assert.deepStrictEqual({
+			dir: dimBigPictureDir(folder).toString(),
+			isBigPicture: isDimBigPictureRecord([folder], record),
+			nested: isDimBigPictureRecord([folder], joinPath(dimBigPictureDir(folder), 'auth/login.dim')),
+			folderItself: isDimBigPictureRecord([folder], dimBigPictureDir(folder)),
+			perFileRecord: isDimBigPictureRecord([folder], joinPath(dimHookStorageDir(folder), 'src/a.ts.dim')),
+			notADim: isDimBigPictureRecord([folder], joinPath(dimBigPictureDir(folder), 'notes.md')),
+			source: dimSourceFromRecordUri([folder], record),
+		}, {
+			dir: joinPath(folder, '.dim', 'big_picture').toString(),
+			isBigPicture: true,
+			nested: true,
+			folderItself: false,
+			perFileRecord: false,
+			notADim: false,
+			source: undefined,
 		});
 	});
 

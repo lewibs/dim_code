@@ -138,14 +138,19 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			webviewPanel.title = vscode.l10n.t("{0} › {1}", fileName, focusSymbol);
 		}
 
-		// Ask the workbench where this file's `.dim` record lives (seeding an empty one if
-		// needed). The record is in the workspace's `.dim` folder, read via `fs`. If the
-		// lookup fails, still render (an empty README) rather than leaving a blank page.
+		// A big-picture record is opened directly and is its own record. For a source file,
+		// ask the workbench where its `.dim` record lives (seeding an empty one if needed).
+		// The record is in the workspace's `.dim` folder, read via `fs`. If the lookup
+		// fails, still render (an empty README) rather than leaving a blank page.
 		let recordUriStr: string | undefined;
-		try {
-			recordUriStr = await vscode.commands.executeCommand<string | undefined>(resolveRecordCommand, key);
-		} catch {
-			recordUriStr = undefined;
+		if (isBigPictureRecord(document.uri)) {
+			recordUriStr = key;
+		} else {
+			try {
+				recordUriStr = await vscode.commands.executeCommand<string | undefined>(resolveRecordCommand, key);
+			} catch {
+				recordUriStr = undefined;
+			}
 		}
 		const recordUri = recordUriStr ? vscode.Uri.parse(recordUriStr) : undefined;
 
@@ -286,6 +291,16 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		}
 		await vscode.commands.executeCommand(openDimCommand, destination.uri.toString(), destination.viewId);
 	}
+}
+
+/**
+ * Whether a URI is a big-picture record: a `.dim` record under a workspace's
+ * `.dim/big_picture/` folder that answers a question spanning several files, rather
+ * than describing one source file. Mirrors `isDimBigPictureRecord` in the platform's
+ * `dimHookStorage.ts` and this extension's `.dim` editor selector; keep them in sync.
+ */
+function isBigPictureRecord(uri: vscode.Uri): boolean {
+	return uri.path.endsWith('.dim') && uri.path.includes('/.dim/big_picture/');
 }
 
 /**

@@ -10,7 +10,7 @@ import { relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
-import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimCodeFile, parseDimFocus, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimBigPictureRecord, isDimCodeFile, parseDimFocus, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { Extensions as ConfigurationExtensions, ConfigurationScope, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
@@ -332,12 +332,18 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	 * read that could reorder against a rapid second click and leave the wrong diagram
 	 * showing. Diagram contents (for the context keys) still come from {@link _resolve}.
 	 */
-	private _ref(editor: EditorInput | null | undefined): { readonly sourceUri: URI; readonly recordActive: boolean } | undefined {
+	private _ref(editor: EditorInput | null | undefined): { readonly sourceUri: URI; readonly recordActive: boolean; readonly bigPicture: boolean } | undefined {
 		const sourceUri = editor?.resource;
-		if (!editor || !sourceUri || !isDimCodeFile(sourceUri) || !this._contextService.getWorkspaceFolder(sourceUri)) {
+		if (!editor || !sourceUri || !this._contextService.getWorkspaceFolder(sourceUri)) {
 			return undefined;
 		}
-		return { sourceUri, recordActive: editor.editorId === DIM_EDITOR_VIEW_TYPE };
+		// A big-picture record is opened directly: it is its own record, and its "source"
+		// for the toggle (Raw shows the record's JSON).
+		const bigPicture = isDimBigPictureRecord(this._contextService.getWorkspace().folders.map(folder => folder.uri), sourceUri);
+		if (!bigPicture && !isDimCodeFile(sourceUri)) {
+			return undefined;
+		}
+		return { sourceUri, recordActive: editor.editorId === DIM_EDITOR_VIEW_TYPE, bigPicture };
 	}
 
 	/**
@@ -350,7 +356,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		if (!ref) {
 			return undefined;
 		}
-		const recordUriStr = await this._resolveRecordUri(ref.sourceUri.toString());
+		const recordUriStr = ref.bigPicture ? ref.sourceUri.toString() : await this._resolveRecordUri(ref.sourceUri.toString());
 		if (!recordUriStr) {
 			return undefined;
 		}

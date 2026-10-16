@@ -227,6 +227,38 @@ export function dimHookStorageDir(workspaceFolder: URI): URI {
 }
 
 /**
+ * The folder, inside the records folder, that holds "big picture" records: `.dim`
+ * records an agent writes to answer a question that spans several files (how a feature
+ * flows, how subsystems fit together). Unlike a per-file record, a big-picture record
+ * describes no single source file; it is opened directly in the diagram viewer, its
+ * README says what the diagrams show and its diagrams' links point at the files
+ * involved. Mirrored by the `mermaid-markdown-features` extension (its `.dim` editor
+ * selector and `isBigPictureRecord`) and the `big-picture` skill; keep them in sync.
+ */
+const dimBigPictureFolderName = 'big_picture';
+
+/**
+ * Resolves the directory holding a workspace folder's big-picture records:
+ * `<workspaceFolder>/.dim/big_picture`.
+ *
+ * @param workspaceFolder The opened workspace folder the records belong to.
+ */
+export function dimBigPictureDir(workspaceFolder: URI): URI {
+	return joinPath(dimHookStorageDir(workspaceFolder), dimBigPictureFolderName);
+}
+
+/**
+ * Whether a URI is a big-picture `.dim` record (see {@link dimBigPictureDir}) of one of
+ * the given workspace folders.
+ *
+ * @param workspaceFolders The opened workspace folders to check against.
+ * @param uri The URI to classify.
+ */
+export function isDimBigPictureRecord(workspaceFolders: readonly URI[], uri: URI): boolean {
+	return uri.path.endsWith('.dim') && workspaceFolders.some(folder => extUri.isEqualOrParent(uri, dimBigPictureDir(folder)) && !extUri.isEqual(uri, dimBigPictureDir(folder)));
+}
+
+/**
  * Adds or removes the `.gitignore` in a workspace folder's records folder, so git
  * ignores the records (`ignoreInGit`) or sees them for committing. With
  * `ignoreInGit`, this creates the records folder if needed; otherwise it never
@@ -283,7 +315,8 @@ export function dimHookRecordUri(workspaceFolder: URI, file: URI): URI | undefin
  * {@link dimHookRecordUri}: given a record under {@link dimHookStorageDir} for one
  * of the open workspace folders, returns the workspace file it mirrors. Returns
  * `undefined` when the URI is not a `.dim` record under any of those folders'
- * storage directories.
+ * storage directories, or is a big-picture record (see {@link dimBigPictureDir}),
+ * which describes no single source file.
  *
  * This lets the diagram viewer present itself as its source file (tab, breadcrumbs)
  * even though the editor is opened on the record in the records folder.
@@ -292,7 +325,7 @@ export function dimHookRecordUri(workspaceFolder: URI, file: URI): URI | undefin
  * @param record The `.dim` record URI to map back to its source file.
  */
 export function dimSourceFromRecordUri(workspaceFolders: readonly URI[], record: URI): URI | undefined {
-	if (!record.path.endsWith('.dim')) {
+	if (!record.path.endsWith('.dim') || isDimBigPictureRecord(workspaceFolders, record)) {
 		return undefined;
 	}
 	for (const folder of workspaceFolders) {
