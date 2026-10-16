@@ -108,6 +108,7 @@ const desktopEntryPoints = [
 	'vs/platform/terminal/node/ptyHostMain',
 	'vs/platform/agentHost/node/agentHostMain',
 	'vs/platform/agentHost/node/diffWorkerMain',
+	'vs/platform/agentHost/node/claude/dimWorkflow/validateDimDiagrams',
 	'vs/workbench/api/node/extensionHostProcess',
 ];
 
@@ -137,6 +138,7 @@ const serverEntryPoints = [
 	'vs/platform/terminal/node/ptyHostMain',
 	'vs/platform/agentHost/node/agentHostMain',
 	'vs/platform/agentHost/node/diffWorkerMain',
+	'vs/platform/agentHost/node/claude/dimWorkflow/validateDimDiagrams',
 ];
 
 /**

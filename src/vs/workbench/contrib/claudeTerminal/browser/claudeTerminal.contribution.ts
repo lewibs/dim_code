@@ -7,7 +7,7 @@ import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { FileAccess } from '../../../../base/common/network.js';
-import { joinPath } from '../../../../base/common/resources.js';
+import { dirname, joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -213,9 +213,17 @@ class ClaudeTerminalViewPane extends ViewPane {
 			// Diagram generation calls Claude per changed file and can take a while, so the
 			// hook detaches it into the background (with its output closed, since the CLI waits
 			// for the hook's stdout/stderr to close) and returns immediately.
-			const hookCommand = dimStorageDir
-				? `DIM_DIM_DIR="${dimStorageDir}" nohup sh "\${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh" >/dev/null 2>&1 &`
-				: 'nohup sh "${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh" >/dev/null 2>&1 &';
+			// The generator checks that the diagrams build with the Mermaid package the Dim
+			// editor renders them with; the plugin's copy of it cannot find that package
+			// relative to itself, so point it at the bundled extension's node_modules.
+			const generatorSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/generateDimDiagram.sh');
+			const mermaidDir = joinPath(dirname(generatorSource), '../../../../../../../extensions/mermaid-markdown-features/node_modules').fsPath;
+			const hookEnv = dimStorageDir
+				? `DIM_DIM_DIR="${dimStorageDir}" DIM_MERMAID_DIR="${mermaidDir}"`
+				: `DIM_MERMAID_DIR="${mermaidDir}"`;
+			// It runs in its own session (`setsid`, where available) so it is not killed with the
+			// CLI's process group when the session ends or the terminal closes.
+			const hookCommand = `${hookEnv} nohup $(command -v setsid) sh "\${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh" >/dev/null 2>&1 &`;
 			const hooks = {
 				description: 'Dim built-in hooks',
 				hooks: {
@@ -230,14 +238,17 @@ class ClaudeTerminalViewPane extends ViewPane {
 			await this._fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
 			await this._fileService.writeFile(joinPath(hooksDir, 'hooks.json'), VSBuffer.fromString(JSON.stringify(hooks, null, '\t')));
 
-			// Copy the bundled hook script and its per-file diagram generator straight from
-			// the build output so the plugin and Dim's native sessions share a single source
-			// of truth. updateDimHook.sh resolves the generator relative to itself, so both
-			// must land in the same hooks folder.
+			// Copy the bundled hook script, its per-file diagram generator and the generator's
+			// diagram check straight from the build output so the plugin and Dim's native
+			// sessions share a single source of truth. updateDimHook.sh resolves the generator,
+			// and the generator its check, relative to itself, so all must land in the same
+			// hooks folder. The check is copied as an .mjs, as the plugin has no package.json
+			// marking its .js files as ES modules.
 			const hookSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/updateDimHook.sh');
-			const generatorSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/generateDimDiagram.sh');
+			const validatorSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/validateDimDiagrams.js');
 			await this._fileService.writeFile(joinPath(hooksDir, 'updateDimHook.sh'), (await this._fileService.readFile(hookSource)).value);
 			await this._fileService.writeFile(joinPath(hooksDir, 'generateDimDiagram.sh'), (await this._fileService.readFile(generatorSource)).value);
+			await this._fileService.writeFile(joinPath(hooksDir, 'validateDimDiagrams.mjs'), (await this._fileService.readFile(validatorSource)).value);
 
 			// Copy each terminal skill's markdown files whole. For diagram-writing that is the
 			// general SKILL.md (which holds the method and the catalog of kinds the generator

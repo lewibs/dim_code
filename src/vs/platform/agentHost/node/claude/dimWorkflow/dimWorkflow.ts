@@ -41,7 +41,12 @@ export function dimDefaultHookGroup(log: (data: string) => void, context: IDimHo
 		hooks: [async () => {
 			// Diagram generation calls Claude per changed file and can take a while, so run it
 			// in the background instead of holding the turn open until it finishes.
-			const env = context.dimStorageDir ? { ...process.env, DIM_DIM_DIR: context.dimStorageDir } : process.env;
+			// The generator checks that the diagrams build with Node; hand it this process's
+			// own (Electron as Node), so it need not be on the user's PATH.
+			const env: NodeJS.ProcessEnv = { ...process.env, DIM_NODE: process.execPath, ELECTRON_RUN_AS_NODE: '1' };
+			if (context.dimStorageDir) {
+				env.DIM_DIM_DIR = context.dimStorageDir;
+			}
 			const child = spawn('/bin/sh', [scriptPath], { cwd: context.workspaceDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
 			child.stdout?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));
 			child.stderr?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));

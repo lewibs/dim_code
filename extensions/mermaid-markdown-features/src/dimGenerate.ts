@@ -44,9 +44,9 @@ interface IDimGenerateArgs {
  * `DIM_PROGRESS <step>` lines (`starting` until the first one arrives). Keep in sync
  * with the `progress` calls in `generateDimDiagram.sh`.
  */
-export type DimGenerationStep = 'starting' | 'reading' | 'claude' | 'saving';
+export type DimGenerationStep = 'starting' | 'reading' | 'claude' | 'checking' | 'fixing' | 'saving';
 
-const dimGenerationSteps: readonly DimGenerationStep[] = ['starting', 'reading', 'claude', 'saving'];
+const dimGenerationSteps: readonly DimGenerationStep[] = ['starting', 'reading', 'claude', 'checking', 'fixing', 'saving'];
 
 /**
  * The state of a source file's latest generation run, for the Dim editor to show.
@@ -98,9 +98,10 @@ export class DimGenerationStatus extends Disposable {
  * replaces `process.platform` with `"web"` there, so the guard below is constant and
  * esbuild drops the `require` from the web bundle.
  *
+ * @param extensionUri This extension's folder, whose `node_modules` holds Mermaid.
  * @param status Where the state of each run is recorded.
  */
-export function registerDimGenerate(status: DimGenerationStatus): vscode.Disposable {
+export function registerDimGenerate(extensionUri: vscode.Uri, status: DimGenerationStatus): vscode.Disposable {
 	return vscode.commands.registerCommand(generateRecordCommand, (args: IDimGenerateArgs) => new Promise<void>(resolve => {
 		// The build replaces `process.platform` with the literal `"web"` in the web
 		// bundle (`NodeJS.Platform` never includes it, hence the cast), making this a
@@ -145,7 +146,16 @@ export function registerDimGenerate(status: DimGenerationStatus): vscode.Disposa
 		};
 
 		const focusArgs = args.focusKind && args.focusSymbol ? [args.focusKind, args.focusSymbol] : [];
-		const child = spawn('/bin/sh', [scriptPath, sourcePath, recordPath, args.relPath, ...focusArgs], { stdio: ['ignore', 'pipe', 'pipe'] });
+		// The generator checks that the diagrams build with the Mermaid package this
+		// extension renders them with, run by this host's own Node (Electron as Node), so
+		// neither has to be found on the user's PATH.
+		const env = {
+			...process.env,
+			DIM_NODE: process.execPath,
+			ELECTRON_RUN_AS_NODE: '1',
+			DIM_MERMAID_DIR: vscode.Uri.joinPath(extensionUri, 'node_modules').fsPath,
+		};
+		const child = spawn('/bin/sh', [scriptPath, sourcePath, recordPath, args.relPath, ...focusArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] });
 		child.stdout?.on('data', (chunk: Buffer) => {
 			stdout += chunk.toString();
 			const lines = stdout.split('\n');

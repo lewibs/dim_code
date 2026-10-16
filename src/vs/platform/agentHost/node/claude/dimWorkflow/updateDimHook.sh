@@ -51,7 +51,8 @@ fi
 
 # git status --porcelain emits two status chars, a space, then the path. For a
 # rename the path is "old -> new"; we record the new path. Other quoting cases
-# (paths with unusual characters) are left to git's defaults.
+# (paths with unusual characters) are left to git's defaults. The loop only picks
+# the files; they are generated afterwards, several at a time (see below).
 echo "$changed" | while IFS= read -r line; do
 	path=$(printf '%s' "$line" | cut -c4-)
 	case "$path" in
@@ -77,9 +78,12 @@ echo "$changed" | while IFS= read -r line; do
 		*) continue ;;
 	esac
 
-	# Delegate to the shared generator, which picks the diagrams for this file's code
-	# and (re)writes the record only when the source has changed. Invoked via `sh` (as
-	# this hook itself is launched) so it runs even when the copied script, written
-	# without an executable bit, is not marked executable.
-	sh "$generator" "$root/$path" "$DIM_DIM_DIR/$path.dim" "$path"
-done
+	printf '%s\0' "$path"
+done |
+# Delegate to the shared generator, which picks the diagrams for each file's code and
+# (re)writes the record only when the source has changed. Each file takes Claude about
+# a minute, so DIM_HOOK_JOBS (default 4) files are generated at once to have the records
+# ready before the user opens them. Invoked via `sh` (as this hook itself is launched)
+# so it runs even when the copied script, written without an executable bit, is not
+# marked executable.
+xargs -0 -P "${DIM_HOOK_JOBS:-4}" -I{} sh "$generator" "$root/{}" "$DIM_DIM_DIR/{}.dim" "{}"

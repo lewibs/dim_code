@@ -47,13 +47,21 @@ const openDimCommand = '_dim.openDim';
 
 /**
  * The generator's steps as listed in the README's progress banner, in the order it runs
- * them. Each `id` is a {@link DimGenerationStep} the generator announces.
+ * them. Each `id` is a {@link DimGenerationStep} the generator announces, except
+ * `fixing`, which only happens when the check finds a diagram that does not build and
+ * is shown in the check's place (see {@link bannerStep}).
  */
-const generationSteps: readonly { readonly id: DimGenerationStep; readonly label: () => string }[] = [
+const generationSteps: readonly { readonly id: DimGenerationStep; readonly label: (current: DimGenerationStep) => string }[] = [
 	{ id: 'reading', label: () => vscode.l10n.t("Read the file and its imports") },
 	{ id: 'claude', label: () => vscode.l10n.t("Generating diagrams") },
+	{ id: 'checking', label: current => current === 'fixing' ? vscode.l10n.t("Fix the diagrams that do not build") : vscode.l10n.t("Check that the diagrams build") },
 	{ id: 'saving', label: () => vscode.l10n.t("Save the overview and diagrams") },
 ];
+
+/** The banner entry a generator step is shown as. */
+function bannerStep(step: DimGenerationStep): DimGenerationStep {
+	return step === 'fixing' ? 'checking' : step;
+}
 
 /** One switchable view in the editor: the README overview (`text`) or a diagram (`mermaid`). */
 interface IDimViewEntry {
@@ -284,14 +292,14 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		if (state.kind === 'running') {
 			const hasOverview = view.views.length > 0 && !view.views[0].placeholder;
 			// Before the generator announces its first step, show the first as current.
-			const current = Math.max(0, generationSteps.findIndex(step => step.id === state.step));
+			const current = Math.max(0, generationSteps.findIndex(step => step.id === bannerStep(state.step)));
 			return {
 				kind: 'running',
 				message: hasOverview
 					? vscode.l10n.t("Updating the overview and diagrams for this file's latest changes…")
 					: vscode.l10n.t("Generating an overview and diagrams for this file…"),
 				steps: generationSteps.map((step, index) => ({
-					label: step.label(),
+					label: step.label(state.step),
 					state: index < current ? 'done' : index === current ? 'current' : 'pending',
 				})),
 				startedAt: state.startedAt,

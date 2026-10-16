@@ -35,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(dimEditorProvider);
 	// The workbench fires this (on file open) to (re)generate a file's `.dim` record;
 	// it runs in the extension host because generation needs a child process.
-	context.subscriptions.push(registerDimGenerate(dimGenerationStatus));
+	context.subscriptions.push(registerDimGenerate(context.extensionUri, dimGenerationStatus));
 	// The workbench fires this when git HEAD moves, to drop the change marks of committed files.
 	context.subscriptions.push(registerDimDiffSync());
 	// The workbench fires these to review changes: list them, and accept them by staging them in git.

@@ -55,7 +55,8 @@
 # Keep these codes in sync with `dimGenerate.ts` in the mermaid-markdown-features extension.
 #
 # While it works, it prints a "DIM_PROGRESS <step>" line on stdout as it starts each
-# step (reading, claude, saving), which the editor shows as live progress.
+# step (reading, claude, checking, fixing, saving), which the editor shows as live
+# progress. "fixing" only runs when the check finds a diagram that does not build.
 
 SRC="$1"
 OUT="$2"
@@ -71,6 +72,24 @@ if [ ! -f "$SRC" ]; then
 	echo "generateDimDiagram: source not found: $SRC"
 	exit 0
 fi
+
+# One generation per record at a time. The Stop hook and opening the file can both ask
+# for the same record; the later one waits for the first to finish and then, finding the
+# record up to date below, keeps it instead of asking Claude again. A lock left behind by
+# a run that was killed is taken over.
+mkdir -p "$(dirname "$OUT")"
+lockDir="$OUT.lock"
+while ! mkdir "$lockDir" 2>/dev/null; do
+	lockPid=$(cat "$lockDir/pid" 2>/dev/null)
+	if [ -n "$lockPid" ] && ! kill -0 "$lockPid" 2>/dev/null; then
+		rm -rf "$lockDir"
+		continue
+	fi
+	sleep 1
+done
+echo $$ > "$lockDir/pid"
+trap 'rm -rf "$lockDir"; rm -f "$OUT.err.$$"' EXIT
+trap 'exit 130' INT TERM HUP
 
 # Content hash of the source, used as the freshness stamp. Prefer a real digest;
 # fall back to cksum where none is available. Whatever is used here must match the
@@ -459,6 +478,80 @@ if [ "$firstChar" != "{" ]; then
 	echo "generateDimDiagram: Claude output unusable for $REL; leaving as raw."
 	[ -f "$OUT" ] || writeEmptyRecord
 	exit 6
+fi
+
+progress checking
+
+# Check that the reply builds before saving it: that it parses as JSON and that Mermaid
+# can parse every diagram (see validateDimDiagrams.ts), so the viewer never shows a
+# diagram that only renders as "Syntax error". The check needs Node and the Mermaid
+# package the Dim editor renders with; without either it is skipped and the reply kept.
+# Mermaid is looked up in DIM_MERMAID_DIR (set by callers that know where the editor
+# extension lives), else in the extension's node_modules relative to this script in
+# the build output (out/vs/platform/agentHost/node/claude/dimWorkflow).
+nodeBin="${DIM_NODE:-$(command -v node 2>/dev/null)}"
+# The check is compiled next to this script; the CLI-terminal plugin's copy is an .mjs,
+# as its folder has no package.json marking .js files as ES modules.
+validator="$(dirname "$0")/validateDimDiagrams.js"
+[ -f "$validator" ] || validator="$(dirname "$0")/validateDimDiagrams.mjs"
+mermaidDir="${DIM_MERMAID_DIR:-$(dirname "$0")/../../../../../../../extensions/mermaid-markdown-features/node_modules}"
+
+# Runs the check on $1. Sets checkStatus to the validator's exit code (see its header),
+# checkErrors to what failed and checkFiltered to the reply without its broken diagrams.
+checkReply() {
+	checkErrFile="$OUT.check.$$"
+	checkFiltered=$(printf '%s\n' "$1" | "$nodeBin" "$validator" "$mermaidDir" 2>"$checkErrFile")
+	checkStatus=$?
+	checkErrors=$(head -c 4000 "$checkErrFile" 2>/dev/null)
+	rm -f "$checkErrFile"
+}
+
+if [ -n "$nodeBin" ] && [ -f "$validator" ] && [ -d "$mermaidDir/mermaid" ]; then
+	checkReply "$result"
+	if [ "$checkStatus" = 1 ] || [ "$checkStatus" = 3 ]; then
+		firstStatus=$checkStatus
+		firstFiltered=$checkFiltered
+		fixedUsed=0
+		echo "generateDimDiagram: reply for $REL does not build; asking Claude to fix it."
+		progress fixing
+		fixPrompt=$(cat <<FIX_PROMPT
+${prompt}
+
+--- YOUR PREVIOUS REPLY ---
+${result}
+--- END OF YOUR PREVIOUS REPLY ---
+
+Your previous reply above does not build. These are the errors:
+${checkErrors}
+
+Output the whole JSON object again, following every rule above, with these errors fixed. Keep everything that was already correct. Output ONLY the JSON object.
+FIX_PROMPT
+)
+		fixed=$(printf '%s' "$fixPrompt" | "$claudeBin" -p --model haiku 2>/dev/null)
+		if [ $? -eq 0 ]; then
+			fixed=$(printf '%s\n' "$fixed" | sed '/^[[:space:]]*```/d' | sed '/./,$!d')
+			checkReply "$fixed"
+			case "$checkStatus" in
+				0 | 2)
+					result=$fixed
+					fixedUsed=1
+					;;
+				1)
+					# Still broken: keep the diagrams that do build rather than none.
+					echo "generateDimDiagram: dropping diagrams for $REL that still do not build:"
+					printf '%s\n' "$checkErrors"
+					result=$checkFiltered
+					fixedUsed=1
+					;;
+			esac
+		fi
+		# The fix failed or was not JSON: keep the first reply, without its broken
+		# diagrams. A first reply that was not JSON either is saved as before.
+		if [ "$fixedUsed" = 0 ] && [ "$firstStatus" = 1 ]; then
+			echo "generateDimDiagram: dropping diagrams for $REL that do not build."
+			result=$firstFiltered
+		fi
+	fi
 fi
 
 progress saving
