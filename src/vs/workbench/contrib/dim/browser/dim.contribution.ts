@@ -223,6 +223,12 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	private readonly _activeViewListener = this._register(new MutableDisposable());
 
 	/**
+	 * Watches the active big-picture record (such as a plan being drawn), so the picker
+	 * lists the diagrams the agent adds or drops while the record stays open.
+	 */
+	private readonly _bigPictureWatcher = this._register(new MutableDisposable<DisposableStore>());
+
+	/**
 	 * The diagrams a source file's record holds, keyed by source URI, so the breadcrumb
 	 * picker can list its views synchronously. Populated as editors are resolved.
 	 */
@@ -499,6 +505,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		const activeEditor = this._editorService.activeEditor;
 		const ref = this._ref(activeEditor);
 		this._viewAvailable.set(!!ref);
+		this._watchBigPicture(ref?.bigPicture ? ref.sourceUri : undefined);
 
 		// Keep the viewer on the view its editor input names, and follow later changes.
 		const viewInput = ref ? this._dimInput(activeEditor) : undefined;
@@ -543,6 +550,22 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			}
 		}
 		this._onDidChangeViewOptions.fire();
+	}
+
+	/** Watches the given big-picture record for changes (none when `undefined`), keeping one watch at a time. */
+	private _watchBigPicture(recordUri: URI | undefined): void {
+		if (!recordUri) {
+			this._bigPictureWatcher.clear();
+			return;
+		}
+		const store = new DisposableStore();
+		const watcher = store.add(this._fileService.createWatcher(recordUri, { recursive: false, excludes: [] }));
+		store.add(watcher.onDidChange(e => {
+			if (e.contains(recordUri)) {
+				void this._refreshFromRecord(recordUri, recordUri);
+			}
+		}));
+		this._bigPictureWatcher.value = store;
 	}
 
 	/** The diagram viewer's editor input when the editor is one, else `undefined`. */
