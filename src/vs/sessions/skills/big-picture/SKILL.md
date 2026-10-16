@@ -1,6 +1,6 @@
 ---
 name: big-picture
-description: Answer "how does X work" questions that span several files with a Dim big-picture diagram. Use whenever the user asks how a feature, flow, system or set of components works or fits together and the answer could be shown as a diagram (architecture, call flow, data flow, lifecycle, states), but no single file explains it well. Writes a .dim record to .dim/big_picture/ and opens it for the user.
+description: Answer questions about how code spanning several files works with a Dim big-picture diagram. Use whenever the user asks how a feature, flow, system or set of components works, fits together, manages or handles something, or asks you to "show me", "walk me through" or "explain" one, and the answer could be shown as a diagram (architecture, call flow, data flow, lifecycle, states), but no single file explains it well. Also use it when the user is debugging a problem that crosses components (state falling out of sync, messages not arriving, a cache going stale) and wants to understand the flow before fixing it. Writes a .dim record to .dim/big_picture/ and opens it for the user.
 ---
 
 # Big-picture diagrams in Dim
@@ -13,6 +13,15 @@ Make one only if both of these are true:
 
 1. The user is asking how something works, fits together or flows, and the answer could be shown as a diagram of any kind (structure, sequence, flowchart, states, data).
 2. No single existing file answers it well. If one file does (for example a service that owns the whole flow, or an existing doc with a diagram), **don't** make a big picture. Open that file for the user instead (see the `open-files` skill). Its own Dim view already shows its diagrams.
+
+The question doesn't have to say "how does X work". These all count:
+
+- "Show me how X manages / handles / tracks Y."
+- "Walk me through what happens when…"
+- "Why does X keep falling out of sync with Y? I want to look into it." A debugging question about several components is a request to understand the flow first. Answer it with a big picture of the flow, and put the suspected causes in the README and your reply.
+- Any question whose answer you would explain with an ASCII diagram, or a list of `file:line` references across three or more files. If you're about to draw one in chat, write the record instead.
+
+Signs that no single file answers it: the flow crosses a process or layer boundary (workbench ↔ extension host ↔ webview, main ↔ renderer, client ↔ server), or the same state is kept in several places that have to agree.
 
 Before writing a new record, list `.dim/big_picture/`. If a record already covers the topic, open it. Update it first if the code it describes has changed.
 
