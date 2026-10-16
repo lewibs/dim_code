@@ -10,13 +10,12 @@ import { Schemas } from '../../../../../base/common/network.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { mock, upcastPartial } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { CONTEXT_ACCESSIBILITY_MODE_ENABLED } from '../../../../../platform/accessibility/common/accessibility.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2 } from '../../../../../platform/actions/common/actions.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
-import { IContext, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { MockContextKeyService } from '../../../../../platform/keybinding/test/common/mockKeybindingService.js';
 import { ILogService, NullLogService } from '../../../../../platform/log/common/log.js';
@@ -29,7 +28,6 @@ import { AgentsWindowOpenSource } from '../../../../../platform/window/common/wi
 import { IWorkspaceContextService, WorkspaceFolder } from '../../../../../platform/workspace/common/workspace.js';
 import { extUri } from '../../../../../base/common/resources.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
-import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { CommandService } from '../../../../services/commands/common/commandService.js';
 import { IExtensionService, NullExtensionService } from '../../../../services/extensions/common/extensions.js';
@@ -99,47 +97,6 @@ suite('Agents window launch enablement', () => {
 			const { contextKeyService } = createContribution(count);
 			return contextKeyService.getContextKeyValue(ChatContextKeys.hasCreatedSessionInAgentsWindow.key);
 		}), [false, false, true, true]);
-	});
-
-	test('enables both default keybindings only after the first Agents Window session without gating the command', () => {
-		const { storageService, contextKeyService } = createContribution();
-		const screenReaderMode = CONTEXT_ACCESSIBILITY_MODE_ENABLED.bindTo(contextKeyService);
-		const isSessionsWindow = IsSessionsWindowContext.bindTo(contextKeyService);
-		contextKeyService.createKey(`config.${ChatConfiguration.AgentEnabled}`, true);
-		const context: IContext = { getValue: key => contextKeyService.getContextKeyValue(key) };
-		const action = new OpenAgentsWindowAction();
-		const keybindings = action.desc.keybinding;
-		assert.ok(Array.isArray(keybindings));
-		const matches = () => keybindings.map(keybinding => keybinding.when?.evaluate(context));
-
-		screenReaderMode.set(false);
-		const beforeFirstSession = matches();
-		const commandAvailableBeforeFirstSession = action.desc.precondition?.evaluate(context);
-		screenReaderMode.set(true);
-		const screenReaderBeforeFirstSession = matches();
-
-		storageService.store(AGENTS_WINDOW_TOTAL_SESSIONS_STORAGE_KEY, 1, StorageScope.APPLICATION, StorageTarget.MACHINE);
-		const screenReaderAfterFirstSession = matches();
-		screenReaderMode.set(false);
-		const afterFirstSession = matches();
-		isSessionsWindow.set(true);
-		const inAgentsWindow = matches();
-
-		assert.deepStrictEqual({
-			beforeFirstSession,
-			commandAvailableBeforeFirstSession,
-			screenReaderBeforeFirstSession,
-			screenReaderAfterFirstSession,
-			afterFirstSession,
-			inAgentsWindow,
-		}, {
-			beforeFirstSession: [false, false],
-			commandAvailableBeforeFirstSession: true,
-			screenReaderBeforeFirstSession: [false, false],
-			screenReaderAfterFirstSession: [false, true],
-			afterFirstSession: [true, false],
-			inAgentsWindow: [false, false],
-		});
 	});
 
 	for (const scenario of scenarios) {

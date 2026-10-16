@@ -13,7 +13,6 @@ import { StringSHA1 } from '../../../../../base/common/hash.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
-import { EditorContextKeys } from '../../../../../editor/common/editorContextKeys.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
@@ -21,19 +20,14 @@ import { Categories } from '../../../../../platform/action/common/actionCommonCa
 import { Action2, MenuId } from '../../../../../platform/actions/common/actions.js';
 import { AgentSession } from '../../../../../platform/agentHost/common/agentService.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
-import { IsLinuxContext } from '../../../../../platform/contextkey/common/contextkeys.js';
-import { CONTEXT_ACCESSIBILITY_MODE_ENABLED } from '../../../../../platform/accessibility/common/accessibility.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
-import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
-import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { INativeHostService, IOpenAgentsWindowOptions } from '../../../../../platform/native/common/native.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
-import { EditorAreaFocusContext, IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
@@ -316,20 +310,6 @@ export class OpenAgentsWindowAction extends Action2 {
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: true,
-			keybinding: [{
-				primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyA,
-				weight: KeybindingWeight.WorkbenchContrib,
-				// On Linux, Ctrl+Shift+A is Toggle Block Comment, so defer to it in a focused writable editor.
-				when: ContextKeyExpr.and(ChatContextKeys.hasCreatedSessionInAgentsWindow, IsSessionsWindowContext.toNegated(), CONTEXT_ACCESSIBILITY_MODE_ENABLED.toNegated(), ContextKeyExpr.or(IsLinuxContext.toNegated(), EditorAreaFocusContext.toNegated(), EditorContextKeys.readOnly)),
-				args: { source: AgentsWindowOpenSource.KeyboardShortcut },
-			}, {
-				// In screen reader mode, Cmd/Ctrl+Shift+A conflicts with many screen reader keybindings,
-				// so require an additional Alt modifier.
-				primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyMod.Alt | KeyCode.KeyA,
-				weight: KeybindingWeight.WorkbenchContrib,
-				when: ContextKeyExpr.and(ChatContextKeys.hasCreatedSessionInAgentsWindow, IsSessionsWindowContext.toNegated(), CONTEXT_ACCESSIBILITY_MODE_ENABLED),
-				args: { source: AgentsWindowOpenSource.KeyboardShortcut },
-			}],
 		});
 	}
 
