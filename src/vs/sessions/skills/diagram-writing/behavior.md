@@ -9,8 +9,8 @@
 
 **Mermaid essentials:**
 - Begin with `sequenceDiagram`.
-- Declare participants you want ordered or aliased: `participant DB as Database`.
-- Calls: `A->>B: request()` (solid, a call), `B-->>A: result` (dashed, a return). Use `A-)B: event` for async/fire-and-forget.
+- Declare participants you want ordered or aliased: `participant DB as Database`. Name participants after the real class, service or module, so each can be linked to the file it lives in.
+- Calls: `A->>B: request()` (solid, a call); start the message with the real name of the method called, so the message can be linked to it, `B-->>A: result` (dashed, a return). Use `A-)B: event` for async/fire-and-forget.
 - Group with `alt Condition ... else ... end`, `opt Condition ... end`, `loop Each item ... end`.
 
 **Avoid:** inventing participants the code doesn't have, and turning a single routine's internal branching into a sequence — that branching is Logic (a flowchart), not Behavior.

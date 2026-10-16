@@ -10,7 +10,7 @@
 **Mermaid essentials:**
 - Begin with `stateDiagram-v2`.
 - `[*] --> Idle` marks the initial state; `Done --> [*]` marks a terminal one.
-- Transitions: `Idle --> Running : start()`; put the trigger after the colon.
+- Transitions: `Idle --> Running : start()`; put the trigger after the colon, using the real method name when a call triggers it so the transition can be linked to it.
 - Nest sub-states with `state Parent { ... }` when a mode has its own internal modes.
 
 **Avoid:** modelling control flow of one call as states (that is Logic), and listing modes with no transitions — the transitions and their triggers are the whole point.

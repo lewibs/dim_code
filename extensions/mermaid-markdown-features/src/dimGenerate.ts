@@ -33,6 +33,10 @@ interface IDimGenerateArgs {
 	readonly recordUri: string;
 	/** The source file's workspace-relative path, stored inside the record. */
 	readonly relPath: string;
+	/** For a view focused on one symbol: its kind (`class`, `function` or `attribute`). */
+	readonly focusKind?: string;
+	/** For a view focused on one symbol: the symbol, e.g. `Session.state`. */
+	readonly focusSymbol?: string;
 }
 
 /**
@@ -140,7 +144,8 @@ export function registerDimGenerate(status: DimGenerationStatus): vscode.Disposa
 			resolve();
 		};
 
-		const child = spawn('/bin/sh', [scriptPath, sourcePath, recordPath, args.relPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const focusArgs = args.focusKind && args.focusSymbol ? [args.focusKind, args.focusSymbol] : [];
+		const child = spawn('/bin/sh', [scriptPath, sourcePath, recordPath, args.relPath, ...focusArgs], { stdio: ['ignore', 'pipe', 'pipe'] });
 		child.stdout?.on('data', (chunk: Buffer) => {
 			stdout += chunk.toString();
 			const lines = stdout.split('\n');

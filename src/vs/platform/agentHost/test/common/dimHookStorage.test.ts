@@ -12,7 +12,7 @@ import { FileService } from '../../../files/common/fileService.js';
 import { IFileService } from '../../../files/common/files.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, seedDimRecord, serializeDimRecord, isDimCodeFile, syncDimRecordsGitignore } from '../../common/dimHookStorage.js';
+import { dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, parseDimFocus, seedDimRecord, serializeDimRecord, isDimCodeFile, syncDimRecordsGitignore } from '../../common/dimHookStorage.js';
 import { DimDiagramType } from '../../common/dimDiagramTypes.js';
 
 suite('dimHookStorage', () => {
@@ -34,6 +34,28 @@ suite('dimHookStorage', () => {
 			nestedFile: joinPath(dir, 'src/a/b.ts.dim').toString(),
 			outsideFolder: undefined,
 			folderItself: undefined,
+		});
+	});
+
+	test('a source URI focused on one symbol maps to its own record, and back to its file', () => {
+		const file = URI.file('/home/u/project/src/a.ts');
+		const focused = file.with({ fragment: 'attribute:Session.state' });
+		const record = dimHookRecordUri(folder, focused)!;
+
+		assert.deepStrictEqual({
+			focus: parseDimFocus(focused),
+			plain: parseDimFocus(file),
+			notAFocus: parseDimFocus(file.with({ fragment: 'L10' })),
+			unsafeSymbol: parseDimFocus(file.with({ fragment: 'function:../x' })),
+			record: record.toString(),
+			source: dimSourceFromRecordUri([folder], record)?.toString(),
+		}, {
+			focus: { kind: 'attribute', symbol: 'Session.state' },
+			plain: undefined,
+			notAFocus: undefined,
+			unsafeSymbol: undefined,
+			record: joinPath(dimHookStorageDir(folder), 'src/a.ts#Session.state.dim').toString(),
+			source: file.toString(),
 		});
 	});
 

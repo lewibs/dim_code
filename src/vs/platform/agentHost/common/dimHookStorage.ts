@@ -7,7 +7,7 @@ import { VSBuffer } from '../../../base/common/buffer.js';
 import { extname, extUri, joinPath, relativePath } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 import { IFileService } from '../../files/common/files.js';
-import { DimDiagramType, dimDiagramLabel, inferDimDiagramType } from './dimDiagramTypes.js';
+import { DimDiagramType, dimDiagramLabel, dimDiagramTypes, inferDimDiagramType } from './dimDiagramTypes.js';
 
 /**
  * File extensions (lower-case, without the leading dot) that Dim treats as
@@ -99,7 +99,9 @@ export function parseDimRecord(content: string): IDimDiagram[] {
 				return parsed.diagrams
 					.filter(d => d && typeof d.mermaid === 'string')
 					.map(d => {
-						const type = (d.type as DimDiagramType) ?? inferDimDiagramType(d.mermaid);
+						// A type outside the catalog (e.g. `stateDiagram-v2`, the mermaid keyword
+						// rather than the catalog's) is read from the diagram's own keyword.
+						const type = dimDiagramTypes.includes(d.type) ? d.type : inferDimDiagramType(d.mermaid);
 						return { type, label: d.label || dimDiagramLabel(type), mermaid: d.mermaid };
 					});
 			}
@@ -156,6 +158,43 @@ export function serializeDimRecord(diagrams: readonly IDimDiagram[], source?: st
 export function isDimCodeFile(file: URI): boolean {
 	const ext = extname(file).replace(/^\./, '').toLowerCase();
 	return ext.length > 0 && dimCodeExtensions.has(ext);
+}
+
+/**
+ * The kind of code entity a focused Dim view describes: a class (or interface, type,
+ * enum), a function or method, or an attribute (a field / property / parameter of a
+ * class, drawn as the state machine of the values it moves through).
+ */
+export type DimFocusKind = 'class' | 'function' | 'attribute';
+
+/**
+ * A Dim view focused on one symbol of a source file rather than the whole file, e.g.
+ * `{ kind: 'attribute', symbol: 'Session.state' }`. Opened by clicking that symbol in
+ * a diagram. Encoded in the source URI's fragment (see {@link parseDimFocus}), and
+ * stored in its own record next to the file's (see {@link dimHookRecordUri}).
+ */
+export interface IDimFocus {
+	readonly kind: DimFocusKind;
+	/** The symbol, qualified by its owner for a member: `Owner.member`. */
+	readonly symbol: string;
+}
+
+/**
+ * The fragment of a focused source URI: `<kind>:<symbol>`, with the symbol made of
+ * dotted identifiers so it is safe in a file name. Mirrored by `formatDimFocus` in the
+ * `mermaid-markdown-features` extension and by `generateDimDiagram.sh`; keep the three in sync.
+ */
+const dimFocusPattern = /^(?<kind>class|function|attribute):(?<symbol>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)$/;
+
+/**
+ * Reads the {@link IDimFocus} a source URI carries in its fragment, or `undefined` for
+ * a plain (whole-file) source URI or a fragment that is not a Dim focus.
+ *
+ * @param uri The source file URI, possibly with a `<kind>:<symbol>` fragment.
+ */
+export function parseDimFocus(uri: URI): IDimFocus | undefined {
+	const groups = dimFocusPattern.exec(uri.fragment)?.groups;
+	return groups ? { kind: groups.kind as DimFocusKind, symbol: groups.symbol } : undefined;
 }
 
 /**
@@ -223,6 +262,10 @@ export async function syncDimRecordsGitignore(fileService: IFileService, workspa
  * the path the hook builds from `git status`, so callers that redirect a file
  * open to its record resolve the same location the hook wrote.
  *
+ * A source URI focused on one symbol (see {@link parseDimFocus}) gets its own record
+ * next to the file's, named after the symbol: `src/foo.ts#Foo.state` ->
+ * `<dir>/src/foo.ts#Foo.state.dim`.
+ *
  * @param workspaceFolder The workspace folder the file belongs to.
  * @param file The workspace file whose change record is wanted.
  */
@@ -231,7 +274,8 @@ export function dimHookRecordUri(workspaceFolder: URI, file: URI): URI | undefin
 	if (relative === undefined || relative.length === 0 || relative.startsWith('..')) {
 		return undefined; // the file is outside the workspace folder
 	}
-	return joinPath(dimHookStorageDir(workspaceFolder), `${relative}.dim`);
+	const focus = parseDimFocus(file);
+	return joinPath(dimHookStorageDir(workspaceFolder), focus ? `${relative}#${focus.symbol}.dim` : `${relative}.dim`);
 }
 
 /**
@@ -256,7 +300,10 @@ export function dimSourceFromRecordUri(workspaceFolders: readonly URI[], record:
 		if (relative === undefined || relative.length === 0 || relative.startsWith('..')) {
 			continue; // not under this folder's record directory
 		}
-		return joinPath(folder, relative.slice(0, -'.dim'.length));
+		// A focused record (`foo.ts#Foo.state.dim`) describes part of the same file.
+		const source = relative.slice(0, -'.dim'.length);
+		const hash = source.indexOf('#');
+		return joinPath(folder, hash >= 0 ? source.slice(0, hash) : source);
 	}
 	return undefined;
 }
@@ -282,7 +329,7 @@ export async function seedDimRecord(fileService: IFileService, workspaceFolder: 
 	if (!isDimCodeFile(file)) {
 		return undefined; // only source-code files get a record
 	}
-	if (extUri.isEqualOrParent(file, dimHookStorageDir(workspaceFolder))) {
+	if (extUri.isEqualOrParent(file.with({ fragment: '' }), dimHookStorageDir(workspaceFolder))) {
 		return undefined; // inside the records folder: never seed a record for a record
 	}
 	const record = dimHookRecordUri(workspaceFolder, file);

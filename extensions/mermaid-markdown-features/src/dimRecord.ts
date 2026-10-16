@@ -16,9 +16,57 @@ export interface IDimDiagramView {
 	readonly type: string;
 	readonly label: string;
 	readonly mermaid: string;
+	/** What each clickable element of the diagram stands for in the code. */
+	readonly links: readonly IDimLink[];
+}
+
+/**
+ * The kind of code a diagram element stands for: a class (or interface, type, enum), a
+ * function or method, an attribute (field, property or class parameter), or a whole
+ * file. The first three are also the kinds of focused view (see `dimNavigate.ts`).
+ */
+export type DimLinkKind = 'class' | 'function' | 'attribute' | 'file';
+
+const dimLinkKinds: readonly DimLinkKind[] = ['class', 'function', 'attribute', 'file'];
+
+/**
+ * One entry of a diagram's `links` list, written by the generator: an element as the
+ * diagram draws it (`label`) and the code it stands for. See "Making every element
+ * clickable" in the `diagram-writing` skill.
+ */
+export interface IDimLink {
+	/** The element as drawn: a box name, `Box.member`, a participant or a message's call. */
+	readonly label: string;
+	/** The code identifier, qualified by its owner for a member (`Class.member`). */
+	readonly symbol: string;
+	readonly kind: DimLinkKind;
+	/** Workspace-relative path of the defining file, when known. */
+	readonly file?: string;
+}
+
+/** Keeps the well-formed entries of a diagram's raw `links` value. */
+function parseLinks(raw: unknown): IDimLink[] {
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const links: IDimLink[] = [];
+	for (const entry of raw as Array<Partial<Record<keyof IDimLink, unknown>> | null>) {
+		if (entry && typeof entry.label === 'string' && typeof entry.symbol === 'string' && dimLinkKinds.includes(entry.kind as DimLinkKind)) {
+			links.push({
+				label: entry.label,
+				symbol: entry.symbol,
+				kind: entry.kind as DimLinkKind,
+				file: typeof entry.file === 'string' && entry.file.length > 0 ? entry.file : undefined,
+			});
+		}
+	}
+	return links;
 }
 
 const fallbackLabel = 'Diagram';
+
+/** The catalog's diagram types. Mirrors `dimDiagramTypes` in `dimDiagramTypes.ts`. */
+const knownTypes: readonly string[] = ['classDiagram', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'erDiagram'];
 
 function labelForType(type: string): string {
 	switch (type) {
@@ -52,16 +100,18 @@ export function parseDimRecord(content: string): IDimDiagramView[] {
 	const trimmed = content.trimStart();
 	if (trimmed.startsWith('{')) {
 		try {
-			const parsed = JSON.parse(content) as { diagrams?: Array<{ type?: string; label?: string; mermaid?: string }> };
+			const parsed = JSON.parse(content) as { diagrams?: Array<{ type?: string; label?: string; mermaid?: string; links?: unknown }> };
 			if (parsed && Array.isArray(parsed.diagrams)) {
 				// A valid JSON record: its diagrams are authoritative, even when empty (a
 				// seeded or overview-only record has none). Only a non-JSON legacy record
 				// falls through to being treated as a single block of raw mermaid below.
 				return parsed.diagrams
-					.filter((d): d is { type?: string; label?: string; mermaid: string } => !!d && typeof d.mermaid === 'string')
+					.filter((d): d is { type?: string; label?: string; mermaid: string; links?: unknown } => !!d && typeof d.mermaid === 'string')
 					.map(d => {
-						const type = d.type ?? inferType(d.mermaid);
-						return { type, label: d.label || labelForType(type), mermaid: d.mermaid };
+						// A type outside the catalog (e.g. `stateDiagram-v2`, the mermaid keyword
+						// rather than the catalog's) is read from the diagram's own keyword.
+						const type = d.type && knownTypes.includes(d.type) ? d.type : inferType(d.mermaid);
+						return { type, label: d.label || labelForType(type), mermaid: d.mermaid, links: parseLinks(d.links) };
 					});
 			}
 		} catch {
@@ -69,7 +119,7 @@ export function parseDimRecord(content: string): IDimDiagramView[] {
 		}
 	}
 	const type = inferType(content);
-	return [{ type, label: labelForType(type), mermaid: content }];
+	return [{ type, label: labelForType(type), mermaid: content, links: [] }];
 }
 
 /**

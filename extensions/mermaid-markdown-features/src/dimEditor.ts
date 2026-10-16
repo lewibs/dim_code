@@ -5,7 +5,8 @@
 import * as vscode from 'vscode';
 import { getMermaidEditorHtml, IDimStatusBanner } from './editorManager';
 import { DimGenerationStatus, DimGenerationStep } from './dimGenerate';
-import { parseDimReadme, parseDimRecord } from './dimRecord';
+import { dimFocusSymbol, IDimNavigateTarget, resolveDimNavigation } from './dimNavigate';
+import { IDimLink, parseDimReadme, parseDimRecord } from './dimRecord';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
 import { MermaidWebviewManager } from './webviewManager';
@@ -36,26 +37,12 @@ const showDiagramCommand = '_dim.showDiagram';
 const resolveRecordCommand = '_dim.resolveRecord';
 
 /**
- * Workbench command a diagram click is forwarded to. It receives the clicked source
- * file URI (as a string) and the {@link IDimNavigateTarget} describing what was clicked,
- * and is responsible for opening the right resource — the source file for a box, or a
- * companion `.dim` view for a member. NOTE: this command is the seam for that
- * navigation logic, which is not implemented yet; until it is, a click is a no-op.
+ * Workbench command that opens a source URI (a whole file, or one symbol of it via a
+ * focus fragment) in this diagram viewer, optionally on a given view. Run once a click
+ * in a diagram has been resolved to the Dim view it opens. Duplicated as
+ * `OPEN_DIM_COMMAND` in the workbench `dim.contribution`; keep the two in sync.
  */
-const navigateFromDiagramCommand = '_dim.navigateFromDiagram';
-
-/**
- * What a click in a Dim diagram addresses. Mirrors `DimNavigateTarget` on the webview
- * side (`preview-src/chat/dimClickable.ts`); it is the *shape* of the request, not a
- * resolved resource — the workbench decides which file or `.dim` view it maps to.
- */
-interface IDimNavigateTarget {
-	readonly kind: 'node' | 'member';
-	readonly node: string;
-	readonly member?: string;
-	readonly memberKind?: 'attribute' | 'method';
-	readonly diagramType?: string;
-}
+const openDimCommand = '_dim.openDim';
 
 /**
  * The generator's steps as listed in the README's progress banner, in the order it runs
@@ -75,6 +62,8 @@ interface IDimViewEntry {
 	readonly text?: string;
 	/** Set on the README view when the file has no overview yet. */
 	readonly placeholder?: boolean;
+	/** For a diagram: what each of its clickable elements stands for in the code. */
+	readonly links?: readonly IDimLink[];
 }
 
 /** An open Dim editor: its panel, the record it reads, its views and the one shown. */
@@ -91,7 +80,7 @@ interface IDimView {
  * diagram. The editor is registered (at `option` priority) for the same source-code
  * resources as the normal text editor, so both views share one tab, path and
  * breadcrumb — exactly like Markdown's text/preview pair. The record itself is a
- * sidecar under the workspace storage home and is never opened as an editor; this
+ * sidecar in the workspace `.dim` folder and is never opened as an editor; this
  * provider looks it up via {@link resolveRecordCommand} and reads it directly.
  *
  * The native Dim view toggle in the editor title bar switches a slot between the
@@ -141,10 +130,17 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'chat-webview-out')]
 		};
 
-		// Ask the workbench where this file's `.dim` record lives (seeding an empty one
-		// if needed). The record is a sidecar outside the workspace, read via `fs`. If the
-		// lookup fails, still render (the README explains there is no overview) rather
-		// than leaving a blank page.
+		// A view focused on one symbol of the file is titled after it, so its tab can be
+		// told apart from the whole file's.
+		const focusSymbol = dimFocusSymbol(document.uri);
+		if (focusSymbol) {
+			const fileName = document.uri.path.substring(document.uri.path.lastIndexOf('/') + 1);
+			webviewPanel.title = vscode.l10n.t("{0} › {1}", fileName, focusSymbol);
+		}
+
+		// Ask the workbench where this file's `.dim` record lives (seeding an empty one if
+		// needed). The record is in the workspace's `.dim` folder, read via `fs`. If the
+		// lookup fails, still render (an empty README) rather than leaving a blank page.
 		let recordUriStr: string | undefined;
 		try {
 			recordUriStr = await vscode.commands.executeCommand<string | undefined>(resolveRecordCommand, key);
@@ -269,22 +265,26 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 	}
 
 	/**
-	 * Forwards a diagram click to the workbench's navigation command, which maps the
-	 * clicked box or member to a source file or companion `.dim` view and opens it.
+	 * Opens the Dim view a diagram click names (see {@link resolveDimNavigation} for the
+	 * rules), using the links the record stores for the clicked diagram. A click that
+	 * names no code says so in the status bar.
 	 *
-	 * The mapping itself lives behind {@link navigateFromDiagramCommand} and is not yet
-	 * implemented; the command may therefore be unregistered, so a missing command is
-	 * swallowed and the click simply does nothing until the logic is added.
-	 *
-	 * @param sourceUri The clicked file's source URI, as a string.
-	 * @param target What was clicked (a box or a member row).
+	 * @param sourceUri The URI the clicked view shows, as a string.
+	 * @param target What was clicked (a box, a member row or a message).
 	 */
 	private async _navigateFromDiagram(sourceUri: string, target: IDimNavigateTarget): Promise<void> {
-		try {
-			await vscode.commands.executeCommand(navigateFromDiagramCommand, sourceUri, target);
-		} catch {
-			// The resolution command is not registered yet; navigation is a no-op until it is.
+		const view = this._views.get(sourceUri);
+		const shown = view?.views[view.index];
+		const otherLinks = view?.views.filter(entry => entry !== shown).flatMap(entry => entry.links ?? []) ?? [];
+		const destination = await resolveDimNavigation(vscode.Uri.parse(sourceUri), shown?.links ?? [], otherLinks, target);
+		if (!destination) {
+			const clicked = target.member || target.node;
+			if (clicked) {
+				vscode.window.setStatusBarMessage(vscode.l10n.t("Dim: No code found for \"{0}\".", clicked), 4000);
+			}
+			return;
 		}
+		await vscode.commands.executeCommand(openDimCommand, destination.uri.toString(), destination.viewId);
 	}
 }
 
@@ -315,5 +315,5 @@ async function loadViews(recordUri: vscode.Uri): Promise<IDimViewEntry[]> {
 	}
 	const readme = content !== undefined ? parseDimReadme(content) : undefined;
 	const diagrams = content !== undefined ? parseDimRecord(content) : [];
-	return [buildReadmeView(readme), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid }))];
+	return [buildReadmeView(readme), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid, links: d.links }))];
 }

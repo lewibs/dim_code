@@ -10,7 +10,7 @@ import { relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
-import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimCodeFile, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimCodeFile, parseDimFocus, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { Extensions as ConfigurationExtensions, ConfigurationScope, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
@@ -69,6 +69,15 @@ const RESOLVE_RECORD_COMMAND = '_dim.resolveRecord';
  * the generator itself no-ops when the record is already current.
  */
 const GENERATE_RECORD_COMMAND = '_dim.generateRecord';
+
+/**
+ * Command the diagram viewer runs when a click in a diagram resolves to another Dim
+ * view: it opens the given source URI (a whole file, or one symbol of it via a focus
+ * fragment, see `parseDimFocus`) in the diagram viewer, on the given view when one is
+ * named (e.g. a stateful attribute's `stateDiagram`). Duplicated as `openDimCommand`
+ * in the `mermaid-markdown-features` extension's `dimEditor`; keep the two in sync.
+ */
+const OPEN_DIM_COMMAND = '_dim.openDim';
 
 /**
  * Absolute URI of the bundled per-file diagram generator, handed to
@@ -188,6 +197,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		// the hashing that maps a source file to its sidecar is platform-only, so it stays
 		// here and the extension reads the resolved record itself.
 		this._register(CommandsRegistry.registerCommand(RESOLVE_RECORD_COMMAND, (_accessor, sourceUriStr: string) => this._resolveRecordUri(sourceUriStr)));
+		this._register(CommandsRegistry.registerCommand(OPEN_DIM_COMMAND, (_accessor, sourceUriStr: string, viewId?: string) => this._openDim(URI.parse(sourceUriStr), viewId)));
 
 		this._register(this._editorService.onDidActiveEditorChange(() => this._update()));
 		this._update();
@@ -272,11 +282,14 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			return;
 		}
 		this._generating.add(key);
+		const focus = parseDimFocus(sourceUri);
 		Promise.resolve(this._commandService.executeCommand(GENERATE_RECORD_COMMAND, {
 			scriptUri: DIM_GENERATOR_URI.toString(),
 			sourceUri: sourceUri.toString(),
 			recordUri: recordUri.toString(),
 			relPath,
+			focusKind: focus?.kind,
+			focusSymbol: focus?.symbol,
 		})).finally(() => {
 			this._generating.delete(key);
 			// The generator may have written a diagram chosen from the file's code (or
@@ -414,11 +427,34 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			return; // the source file is already showing, or there is no record
 		}
 		// Reopen the same resource with the default (text) editor override: the diagram
-		// viewer and text editor share one resource, so this reuses the tab in place.
+		// viewer and text editor share one resource, so this reuses the tab in place. A
+		// view focused on one symbol drops its focus fragment: the raw view is the file.
 		await this._editorService.replaceEditors([{
 			editor: activeEditor,
-			replacement: { resource: ref.sourceUri, options: { override: DEFAULT_EDITOR_ASSOCIATION.id, pinned: true } }
+			replacement: { resource: ref.sourceUri.with({ fragment: '' }), options: { override: DEFAULT_EDITOR_ASSOCIATION.id, pinned: true } }
 		}], group);
+	}
+
+	/**
+	 * Opens a source file, or one symbol of it, in the Dim diagram viewer: a new tab, or
+	 * the existing one when that view is already open. Backs {@link OPEN_DIM_COMMAND},
+	 * which a click in a diagram runs once it has resolved what was clicked.
+	 *
+	 * @param sourceUri The source file URI, with a focus fragment for one symbol.
+	 * @param viewId The view to open on (a {@link DimDiagramType}); the viewer's
+	 * default (the README overview) when omitted.
+	 */
+	private async _openDim(sourceUri: URI, viewId: string | undefined): Promise<void> {
+		if (!isDimCodeFile(sourceUri) || !this._contextService.getWorkspaceFolder(sourceUri)) {
+			return;
+		}
+		if (viewId) {
+			// Tell the viewer which view to show before it opens, as {@link _showView} does,
+			// so it resolves straight onto that view in its initial render.
+			this._selectedBySource.set(sourceUri.toString(), viewId);
+			await this._commandService.executeCommand(SHOW_DIAGRAM_COMMAND, sourceUri.toString(), viewId);
+		}
+		await this._editorService.openEditor({ resource: sourceUri, options: { override: DIM_EDITOR_VIEW_TYPE, pinned: true } });
 	}
 
 	/**

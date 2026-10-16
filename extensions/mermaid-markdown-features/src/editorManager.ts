@@ -482,6 +482,11 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				.dim-clickable-member:hover {
 					text-decoration: underline;
 				}
+				/* The wide, transparent hit area over a sequence message's arrow. */
+				.dim-hit-area.dim-clickable-member:hover {
+					stroke: var(--vscode-focusBorder) !important;
+					stroke-opacity: 0.35;
+				}
 			</style>
 		</head>
 		<body data-dim-clickable="${clickable}" data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">

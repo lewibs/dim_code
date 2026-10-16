@@ -23,6 +23,11 @@
 #   $2  OUT  - absolute path of the ".dim" record to write.
 #   $3  REL  - the source file's workspace-relative path (stored in the record so
 #              the viewer can offer a "Raw" view of it).
+#   $4  FOCUS_KIND   - optional: class, function or attribute, to describe one symbol
+#                      of the file rather than the whole file (a "focused" view,
+#                      opened by clicking that symbol in a diagram).
+#   $5  FOCUS_SYMBOL - optional, with $4: the symbol, e.g. Session.state.
+# The focus kinds mirror `DimFocusKind` in dimHookStorage.ts; keep the two in sync.
 #
 # Regeneration is gated on the source's content hash, which is stamped into the
 # record as `sourceHash`: the record is (re)generated only when it does not exist
@@ -43,6 +48,8 @@
 SRC="$1"
 OUT="$2"
 REL="$3"
+FOCUS_KIND="$4"
+FOCUS_SYMBOL="$5"
 
 if [ -z "$SRC" ] || [ -z "$OUT" ] || [ -z "$REL" ]; then
 	echo "generateDimDiagram: missing argument (src/out/rel); skipping."
@@ -142,7 +149,11 @@ for spec in $imports; do
 	used=$(printf '%s' "$importSection" | wc -c | tr -d ' ')
 	[ "$used" -ge "$importBudget" ] && break
 	piece=$(head -c 8000 "$dep")
-	importSection=$(printf '%s\n--- IMPORTED FROM %s ---\n%s\n' "$importSection" "$spec" "$piece")
+	# Name the dependency by its workspace-relative path, so links to its symbols can
+	# say which file defines them. The workspace root is SRC with REL taken off its end.
+	depAbs="$(cd "$(dirname "$dep")" && pwd)/$(basename "$dep")"
+	depRel="${depAbs#"${SRC%"$REL"}"}"
+	importSection=$(printf '%s\n--- IMPORTED FROM %s (file: %s) ---\n%s\n' "$importSection" "$spec" "$depRel" "$piece")
 done
 
 importBlock=""
@@ -235,6 +246,20 @@ if [ -z "$catalogLabels" ]; then
 	catalogLabels="a short title for the view"
 fi
 
+# A focused view describes one symbol of the file (see "Focused views" in the skill).
+# The kind and symbol come from the editor's own URI parsing, which only accepts
+# dotted identifiers, so they are safe to put into the prompt as they are.
+focusBlock=""
+case "$FOCUS_KIND" in
+	class | function | attribute)
+		if [ -n "$FOCUS_SYMBOL" ]; then
+			focusBlock="
+FOCUS: this is a focused view. Document ONLY the ${FOCUS_KIND} \"${FOCUS_SYMBOL}\" of this file, following the skill's Focused views rules for a ${FOCUS_KIND}; the readme describes only that symbol.
+"
+		fi
+		;;
+esac
+
 prompt=$(cat <<PROMPT_HEADER
 You document source files shown inside an IDE. For the code below, do two things: (1) write a plain-English description of what the file is for and the role/intent of its main class, functions or module, and (2) draw the Mermaid diagram(s) that genuinely help someone understand THIS code.
 
@@ -245,12 +270,14 @@ For the kind(s) you choose, follow that kind's skill below (match the catalog la
 ${skillSections}
 Output rules:
 - "readme" is a plain-text description (no markdown) of THIS file: what it is for, the role/intent of its main class, functions or module, the responsibility it owns and the problem it solves (not just a restatement of its name). Keep it to a few sentences.
+- "type" MUST be exactly the catalog's Mermaid keyword for the kind (e.g. "stateDiagram", even though its source begins "stateDiagram-v2").
 - "label" MUST be exactly one of: ${catalogLabels} (matching the type you chose).
 - "mermaid" MUST be valid Mermaid source beginning with the diagram's keyword.
 - "diagrams" holds only the views that genuinely help (often just one), each a distinct type; never add a type just to have more.
+- Each diagram has a "links" list that maps every box, member, participant and message it draws to the code it stands for, as the skill's links section describes. "file" is the workspace-relative path: "$REL" for this file's own symbols, and the "file:" path shown for each imported definition.
 - Output ONLY a JSON object, no markdown fences and no prose outside it, shaped EXACTLY like (note the leading "{"):
-  {"readme":"...","diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ..."},{"type":"sequenceDiagram","label":"Behavior","mermaid":"sequenceDiagram\n ..."}]}
-
+  {"readme":"...","diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"$REL"}]},{"type":"sequenceDiagram","label":"Behavior","mermaid":"sequenceDiagram\n ...","links":[]}]}
+${focusBlock}
 File: $REL
 --- BEGIN CODE ---
 $code
@@ -281,8 +308,9 @@ fi
 # blank lines so the opening brace lands on the first line for the inject step below.
 result=$(printf '%s\n' "$result" | sed '/^[[:space:]]*```/d' | sed '/./,$!d')
 
-# Accept only output that actually looks like the requested JSON object.
-firstChar=$(printf '%s' "$result" | sed -e 's/^[[:space:]]*//' | cut -c1)
+# Accept only output that actually looks like the requested JSON object. Only the first
+# line is checked: `cut` works per line, and the reply may be pretty-printed.
+firstChar=$(printf '%s\n' "$result" | head -n1 | sed -e 's/^[[:space:]]*//' | cut -c1)
 if [ "$firstChar" != "{" ]; then
 	echo "generateDimDiagram: Claude output unusable for $REL; leaving as raw."
 	[ -f "$OUT" ] || writeEmptyRecord
