@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
+import { clickedNames, unique } from './dimNames';
 import { DimLinkKind, DimLinkView, IDimLink } from './dimRecord';
 
 /**
@@ -140,67 +141,6 @@ function destinationFor(sourceFile: vscode.Uri, resolved: IResolvedSymbol): IDim
 	}
 	const sameFile = file.toString() === sourceFile.toString();
 	return sameFile ? { uri: formatDimFocus(file, kind, symbol), viewId } : { uri: file, viewId };
-}
-
-/** An identifier, as the first capture of a match. */
-const identifier = '[A-Za-z_$][\\w$]*';
-
-/**
- * The names a click could refer to, most specific first: `Box.member` and `member` for
- * a member row, `Receiver.call` and `call` for a message or edge label, the name for a
- * box.
- */
-function clickedNames(target: IDimNavigateTarget): string[] {
-	const node = cleanNodeName(target.node);
-	if (target.kind === 'node') {
-		const first = new RegExp(`^${identifier}`).exec(node)?.[0];
-		return unique([node, first]);
-	}
-	const member = target.member ?? '';
-	if (node) {
-		const name = memberIdentifier(member);
-		return name ? unique([`${node}.${name}`, name]) : [];
-	}
-	const call = callIdentifier(member);
-	const receiver = target.receiver && cleanNodeName(target.receiver);
-	return call ? unique([receiver ? `${receiver}.${call}` : undefined, call]) : [];
-}
-
-/** Drops empty and repeated names, keeping the first of each. */
-function unique(names: ReadonlyArray<string | undefined>): string[] {
-	return [...new Set(names.filter((name): name is string => !!name))];
-}
-
-/** A box label without stereotypes (`«interface»`) or generics (`Foo~T~`, `Foo<T>`). */
-function cleanNodeName(node: string): string {
-	return node.replace(/«[^»]*»|<<[^>]*>>/g, '').replace(/~[^~]*~|<[^>]*>/g, '').trim();
-}
-
-/**
- * The identifier of a class member row: `+save(record): void` → `save`,
- * `-state: State` → `state`, `String name` → `name`.
- */
-function memberIdentifier(member: string): string | undefined {
-	const text = member.replace(/^[+\-#~]\s*/, '').replace(/[$*]/g, '').trim();
-	const call = new RegExp(`(?<name>${identifier})\\s*\\(`).exec(text)?.groups?.name;
-	if (call) {
-		return call;
-	}
-	const typed = new RegExp(`^(?<name>${identifier})\\s*:`).exec(text)?.groups?.name;
-	if (typed) {
-		return typed;
-	}
-	const words = text.match(new RegExp(identifier, 'g'));
-	return words?.[words.length - 1];
-}
-
-/**
- * The call a message or edge label shows: `save(record)` → `save`, a lone identifier as
- * it is. `undefined` for prose ("spawn the generator"), which names no call.
- */
-function callIdentifier(message: string): string | undefined {
-	return new RegExp(`(?<name>${identifier})\\s*\\(`).exec(message)?.groups?.name
-		?? new RegExp(`^\\s*(?<name>${identifier})\\s*$`).exec(message)?.groups?.name;
 }
 
 /** The last dotted segment of a qualified name: `Foo.save` → `save`. */

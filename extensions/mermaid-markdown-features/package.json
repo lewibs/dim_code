@@ -29,7 +29,8 @@
     "onWebviewPanel:vscode.mermaid-markdown-features.preview",
     "onCustomEditor:vscode.mermaid-markdown-features.dimEditor",
     "onCommand:_dim.showDiagram",
-    "onCommand:_dim.generateRecord"
+    "onCommand:_dim.generateRecord",
+    "onCommand:_dim.syncDiffs"
   ],
   "contributes": {
     "customEditors": [

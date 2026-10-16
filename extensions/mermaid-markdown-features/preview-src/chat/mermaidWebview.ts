@@ -5,7 +5,7 @@
 import mermaid from 'mermaid';
 import { buildMermaidConfig, createMermaidErrorElement, loadExtensionConfig, markVsCodeContextAsError } from '../shared';
 import { VsCodeMermaidThemeTracker } from '../shared/vsCodeTheme';
-import { DimNavigate, enhanceDiagramClickability } from './dimClickable';
+import { DimChange, DimNavigate, enhanceDiagramClickability, markDiagramChanges } from './dimClickable';
 import { VsCodeApi } from './vscodeApi';
 
 interface PanZoomState {
@@ -424,7 +424,7 @@ async function rerenderMermaidDiagram(
  * switches between these by index via a `dimSelectDiagram` message. Returns an empty
  * array when the block is absent or malformed.
  */
-function readDimViews(): Array<{ mermaid?: string; text?: string; placeholder?: boolean }> {
+function readDimViews(): Array<{ mermaid?: string; text?: string; placeholder?: boolean; changes?: DimChange[]; isNew?: boolean }> {
 	const dataElement = document.getElementById('dim-views');
 	if (!dataElement) {
 		return [];
@@ -629,15 +629,24 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	// to a concrete resource. A click is routed only when the pointer did not just pan.
 	const clickable = document.body.dataset.dimClickable === 'true';
 	const navigate: DimNavigate = target => vscode.postMessage({ type: 'dimNavigate', target });
-	const enhanceClickability = (): void => {
+
+	// The view the page shows, so a request for it again (the extension re-sends the
+	// current view once the page is ready) does not re-render it and reset pan/zoom.
+	let shownIndex = Number(document.body.dataset.dimIndex ?? 0);
+
+	// Wires the rendered diagram's click targets and colors what changed since the last
+	// commit, both on the SVG mermaid just rendered.
+	const enhanceDiagram = (): void => {
 		if (clickable) {
 			enhanceDiagramClickability(diagram, navigate, () => panZoomHandler.didJustDrag());
 		}
+		const shown = readDimViews()[shownIndex];
+		markDiagramChanges(diagram, shown?.changes ?? [], !!shown?.isNew);
 	};
 
 	// Wire up the initial diagram (the README view has no diagram to enhance).
 	if (!startsOnReadme) {
-		enhanceClickability();
+		enhanceDiagram();
 	}
 
 	// Serialize re-renders. `mermaid.run` mutates the diagram node in place and is
@@ -653,18 +662,24 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 			if (latestSource !== source) {
 				return; // a newer request superseded this one
 			}
-			await rerenderMermaidDiagram(diagram, source, themeTracker);
+			// Mermaid sizes each label box from the label's on-screen size, which includes
+			// the pan/zoom transform on `content`. Rendering while zoomed out would make
+			// every box too narrow and cut its text off on the right, so render unscaled
+			// and put the transform back afterwards (a view switch then resets it anyway).
+			const transform = content.style.transform;
+			content.style.transform = 'none';
+			try {
+				await rerenderMermaidDiagram(diagram, source, themeTracker);
+			} finally {
+				content.style.transform = transform;
+			}
 			if (latestSource === source) {
-				// mermaid replaced the SVG, so re-attach the click targets to the new one.
-				enhanceClickability();
+				// mermaid replaced the SVG, so re-attach the click targets and change colors.
+				enhanceDiagram();
 			}
 		}).catch(() => { /* keep the chain alive so later renders still run */ });
 		return renderChain;
 	};
-
-	// The view the page shows, so a request for it again (the extension re-sends the
-	// current view once the page is ready) does not re-render it and reset pan/zoom.
-	let shownIndex = Number(document.body.dataset.dimIndex ?? 0);
 
 	// Listen for messages from the extension
 	window.addEventListener('message', async event => {

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import { registerChatSupport } from './chatOutputRenderer';
+import { registerDimDiffSync } from './dimDiff';
 import { DimEditorProvider, dimEditorViewType } from './dimEditor';
 import { DimGenerationStatus, registerDimGenerate } from './dimGenerate';
 import { MermaidEditorManager } from './editorManager';
@@ -34,6 +35,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// The workbench fires this (on file open) to (re)generate a file's `.dim` record;
 	// it runs in the extension host because generation needs a child process.
 	context.subscriptions.push(registerDimGenerate(dimGenerationStatus));
+	// The workbench fires this when git HEAD moves, to drop the change marks of committed files.
+	context.subscriptions.push(registerDimDiffSync());
 	context.subscriptions.push(vscode.window.registerCustomEditorProvider(
 		dimEditorViewType,
 		dimEditorProvider,

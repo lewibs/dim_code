@@ -14,3 +14,9 @@
 - Group with `alt Condition ... else ... end`, `opt Condition ... end`, `loop Each item ... end`.
 
 **Avoid:** inventing participants the code doesn't have, and turning a single routine's internal branching into a sequence — that branching is Logic (a flowchart), not Behavior.
+
+**Showing changes** (see "Showing changes" in the main skill):
+- A new or edited call is marked by its message's call (`save` for `A->>B: save(record)`), and a new or deleted participant by its displayed name.
+- A removed call stays drawn in the order it used to happen, wrapped in a removed pair; when it was the only message in an `alt`, `opt` or `loop` block, wrap the whole block.
+- A removed participant stays declared, wrapped in a removed pair together with every message to or from it.
+- Return messages and blocks are not marked; mark the call they belong to.

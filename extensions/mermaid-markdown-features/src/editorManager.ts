@@ -8,6 +8,7 @@ import { MermaidWebviewManager } from './webviewManager';
 import { escapeHtmlText } from './util/html';
 import { Disposable } from './util/dispose';
 import { renderMermaidConfigSpan } from './markdownMermaid/config';
+import { IDimChange, IDimTestCase } from './dimRecord';
 
 export const mermaidEditorViewType = 'vscode.mermaid-markdown-features.preview';
 
@@ -23,6 +24,12 @@ export interface IDimWebviewView {
 	readonly text?: string;
 	/** Set when `text` is a stand-in because the file has no overview yet. */
 	readonly placeholder?: boolean;
+	/** On the README view of a test file: its tests, shown as a table under the overview. */
+	readonly tests?: readonly IDimTestCase[];
+	/** For a diagram: the elements the file's uncommitted changes touched, colored by change. */
+	readonly changes?: readonly IDimChange[];
+	/** For a diagram of a file that is new since the last commit: all of it is colored as added. */
+	readonly isNew?: boolean;
 }
 
 /**
@@ -298,8 +305,13 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 	// in place. `type="application/json"` is a data block (not executed), and
 	// `<`/`>`/`&` are escaped so the payload cannot break out of the script element.
 	const viewData = views.length > 0
-		? `<script type="application/json" id="dim-views" nonce="${nonce}">${JSON.stringify(views.map(v => ({ label: v.label, mermaid: v.mermaid, text: v.text, placeholder: v.placeholder }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
+		? `<script type="application/json" id="dim-views" nonce="${nonce}">${JSON.stringify(views.map(v => ({ label: v.label, mermaid: v.mermaid, text: v.text, placeholder: v.placeholder, changes: v.changes, isNew: v.isNew }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
 		: '';
+
+	// A test file's README also lists its tests. The README is the same whichever view
+	// is shown first, so the table is rendered once here and never swapped.
+	const tests = views.find(v => v.text !== undefined)?.tests;
+	const testsSection = tests && tests.length > 0 ? renderTestsSection(tests) : '';
 
 	// The status banner is always in the README so `dimStatus` messages can fill it in;
 	// it starts hidden when there is nothing to report. The icon classes mirror
@@ -367,6 +379,48 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				.dim-readme-text {
 					white-space: pre-wrap;
 					word-break: break-word;
+				}
+				/* A test file's README holds a five-column table, so it gets more room. */
+				.dim-readme.dim-readme-wide {
+					max-width: 1200px;
+				}
+				.dim-tests h2 {
+					margin: 24px 0 8px;
+					font-size: 1.15em;
+					font-weight: 600;
+				}
+				.dim-tests table {
+					width: 100%;
+					border-collapse: collapse;
+					line-height: 1.4;
+				}
+				.dim-tests th,
+				.dim-tests td {
+					padding: 6px 8px;
+					text-align: left;
+					vertical-align: top;
+					border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+					word-break: break-word;
+				}
+				.dim-tests th {
+					font-weight: 600;
+					color: var(--vscode-descriptionForeground);
+				}
+				.dim-tests code {
+					font-family: var(--vscode-editor-font-family);
+					font-size: 0.95em;
+				}
+				.dim-tests-suite,
+				.dim-tests-none {
+					color: var(--vscode-descriptionForeground);
+				}
+				.dim-tests-suite {
+					display: block;
+					font-size: 0.9em;
+				}
+				.dim-tests ul {
+					margin: 0;
+					padding-left: 20px;
 				}
 				.dim-readme-placeholder {
 					color: var(--vscode-descriptionForeground);
@@ -487,6 +541,37 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 					stroke: var(--vscode-focusBorder) !important;
 					stroke-opacity: 0.35;
 				}
+				/* What changed since the last commit, in the theme's git decoration colors. */
+				.dim-change-added {
+					--dim-change: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+				}
+				.dim-change-changed {
+					--dim-change: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+				}
+				.dim-change-removed {
+					--dim-change: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+				}
+				.dim-change-node:is(rect, path, polygon, circle, ellipse),
+				.dim-change-node :is(rect, path, polygon, circle, ellipse) {
+					fill: color-mix(in srgb, var(--dim-change) 22%, var(--vscode-editor-background)) !important;
+					stroke: var(--dim-change) !important;
+					stroke-width: 2px !important;
+				}
+				/* A box shows its change in its shape only, so a changed member row inside it still stands out. */
+				.dim-change-text:is(text, tspan),
+				.dim-change-text :is(text, tspan, span, div, p) {
+					color: var(--dim-change) !important;
+					fill: var(--dim-change) !important;
+					font-weight: 600;
+				}
+				.dim-change-removed.dim-change-text :is(text, tspan, span, div, p),
+				.dim-change-removed.dim-change-text:is(text, tspan) {
+					text-decoration: line-through;
+				}
+				.dim-change-line {
+					stroke: var(--dim-change) !important;
+					stroke-width: 2px !important;
+				}
 			</style>
 		</head>
 		<body data-dim-clickable="${clickable}" data-dim-index="${index}" data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
@@ -501,15 +586,58 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 			<pre class="mermaid">
 				${escapeHtmlText(mermaidSource)}
 			</pre>
-			<div class="dim-readme"${initialIsReadme ? '' : ' style="display: none;"'}>
+			<div class="dim-readme${testsSection ? ' dim-readme-wide' : ''}"${initialIsReadme ? '' : ' style="display: none;"'}>
 				${statusBanner}
 				<div class="dim-readme-text${readmePlaceholder ? ' dim-readme-placeholder' : ''}">${escapeHtmlText(readmeText)}</div>
+				${testsSection}
 			</div>
 			<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
 		</html>`;
 }
 
+/**
+ * Renders a test file's tests as a table (test, what it checks, input, expected
+ * result, mocks) followed by a "Validation" summary of what the tests mock, so a
+ * reader can tell at a glance how much of the real code the tests exercise.
+ */
+function renderTestsSection(tests: readonly IDimTestCase[]): string {
+	const heading = `<h2>${escapeHtmlText(vscode.l10n.t("Tests"))}</h2>`;
+	const noMocks = vscode.l10n.t("None");
+	const rows = tests.map(test => {
+		const suite = test.suite ? `<span class="dim-tests-suite">${escapeHtmlText(test.suite)}</span>` : '';
+		const mocks = test.mocks.length > 0
+			? test.mocks.map(mock => `<code>${escapeHtmlText(mock)}</code>`).join(', ')
+			: `<span class="dim-tests-none">${escapeHtmlText(noMocks)}</span>`;
+		return `<tr><td>${suite}${escapeHtmlText(test.name)}</td><td>${escapeHtmlText(test.checks)}</td><td>${escapeHtmlText(test.input)}</td><td>${escapeHtmlText(test.expected)}</td><td>${mocks}</td></tr>`;
+	}).join('');
+	const header = [vscode.l10n.t("Test"), vscode.l10n.t("What It Checks"), vscode.l10n.t("Input"), vscode.l10n.t("Expected"), vscode.l10n.t("Mocked")]
+		.map(label => `<th scope="col">${escapeHtmlText(label)}</th>`).join('');
+	const table = `<table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+	return `<section class="dim-tests">${heading}${table}${renderValidation(tests)}</section>`;
+}
+
+/**
+ * Summarizes what a test file's tests mock: each mocked dependency with how many
+ * tests replace it, and how many tests run the real code throughout.
+ */
+function renderValidation(tests: readonly IDimTestCase[]): string {
+	const heading = `<h2>${escapeHtmlText(vscode.l10n.t("Validation"))}</h2>`;
+	const usage = new Map<string, number>();
+	for (const test of tests) {
+		for (const mock of new Set(test.mocks)) {
+			usage.set(mock, (usage.get(mock) ?? 0) + 1);
+		}
+	}
+	if (usage.size === 0) {
+		return `${heading}<p>${escapeHtmlText(vscode.l10n.t("Nothing is mocked: all {0} tests run against the real code.", tests.length))}</p>`;
+	}
+	const items = [...usage].map(([mock, count]) =>
+		`<li><code>${escapeHtmlText(mock)}</code> ${escapeHtmlText(vscode.l10n.t("is mocked in {0} of {1} tests", count, tests.length))}</li>`).join('');
+	const unmocked = tests.filter(test => test.mocks.length === 0).length;
+	const realCode = vscode.l10n.t("{0} of {1} tests use no mocks and run against the real code.", unmocked, tests.length);
+	return `${heading}<ul>${items}</ul><p>${escapeHtmlText(realCode)}</p>`;
+}
 
 /**
  * Generates a unique ID for a diagram based on its content.

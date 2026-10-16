@@ -73,3 +73,32 @@ When the request names a **focus**, document only that one symbol of the file, n
 - **class**: draw a Structure `classDiagram` of that class and its direct collaborators.
 
 A focused view still links everything it draws.
+
+## Showing changes
+
+When the request includes a **diff** (the file has changes that are not committed yet), the diagrams also show what changed. The viewer colors each element by its change: green for added, yellow for changed, red for removed. After the changes are committed, the viewer resets the diagram: added and changed elements go back to normal, and removed elements disappear. For that reset to work without redrawing, mark changes only in the two ways below, and never with mermaid `style`, `classDef`, `class` or `:::` styling.
+
+1. Each diagram gets a **`changes`** list naming every element the diff touched:
+
+   ```json
+   "changes": [
+     { "label": "SessionManager.close", "change": "added" },
+     { "label": "SessionManager.openSession", "change": "changed" },
+     { "label": "SessionStore.flush", "change": "removed" }
+   ]
+   ```
+
+   - **`label`** names the element exactly as a link's `label` does: a box's name, `Box.member` for a member, a participant's displayed name, or a message's call. An edge label is named by its text. Labels must match what the diagram draws, or the element cannot be colored.
+   - **`change`** is `added` (new in the current code), `changed` (it still exists, but its code changed) or `removed` (it is gone from the current code).
+   - Mark the element that best owns a change. For a change inside a method body, mark the method (`Box.method`), not the whole class. Mark a box `changed` only when its own declaration changed (its name, its base types, its fields as a whole). A box whose members were all added is itself `added`.
+2. Keep each **removed** element drawn, as it was in the last commit (the diff's `-` lines), so the reader sees what went away. Wrap each removed element in a pair of comment lines, each on a line of its own:
+
+   ```
+   %% dim:removed
+   ...the removed element's lines...
+   %% dim:end
+   ```
+
+   Everything between the two lines is deleted when the changes are committed, so the pair must enclose whole lines that can be deleted together and still leave valid mermaid. Put the pair inside a box or block when only part of it was removed, and around the whole box or block when all of it was. Also wrap any line that only exists to connect a removed element, such as an edge to a removed box.
+
+Draw the diagram from the current code as usual, then add the removed elements back. Do not mark anything the diff did not touch. Do not output `changes` or removed markers when the request has no diff. When the file is new (not in the last commit), the viewer shows the whole diagram as added, so output no `changes` and no markers either. Each kind's skill says what to mark in that kind of diagram.

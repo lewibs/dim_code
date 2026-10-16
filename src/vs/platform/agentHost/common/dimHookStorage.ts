@@ -68,7 +68,43 @@ export interface IDimRecord {
 	 * legacy records keep parsing.
 	 */
 	readonly readme?: string;
+	/**
+	 * For a test file: one entry per test, shown as a table under the README so it is
+	 * clear at a glance what is tested, with which input, what is expected and what was
+	 * mocked. Written by the generator only for test files (an empty list when it found
+	 * no tests); absent on every other record.
+	 */
+	readonly tests?: readonly IDimTestCase[];
+	/**
+	 * Set when the diagrams were drawn while the source file differed from its diff base
+	 * (by default the last commit): the base commit, and whether the file is new since
+	 * it. Each diagram then also carries a `changes` list of the elements the changes
+	 * touched (`{ label, change: 'added' | 'changed' | 'removed' }`), and wraps each
+	 * removed element in `%% dim:removed` / `%% dim:end` lines. Written by the generator;
+	 * dropped by the `mermaid-markdown-features` extension (`dimDiff.ts`) once the changes
+	 * are committed. See "Showing changes" in the `diagram-writing` skill.
+	 */
+	readonly diff?: { readonly base: string; readonly new: boolean };
 	readonly diagrams: readonly IDimDiagram[];
+}
+
+/**
+ * One test of a test file, as listed in the README's tests table. Mirrors
+ * `IDimTestCase` in the `mermaid-markdown-features` extension's `dimRecord.ts`.
+ */
+export interface IDimTestCase {
+	/** The enclosing suite (`suite`/`describe`) name, when the test is in one. */
+	readonly suite?: string;
+	/** The test's own name. */
+	readonly name: string;
+	/** What behavior the test checks, in plain words. */
+	readonly checks: string;
+	/** The input or setup the test drives the code with. */
+	readonly input: string;
+	/** The result the test asserts. */
+	readonly expected: string;
+	/** What the test replaces with a mock, stub, spy or fake; empty when it runs real code. */
+	readonly mocks: readonly string[];
 }
 
 /** Current `.dim` record format version. Bump when the JSON shape changes. */

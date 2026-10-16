@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import { getMermaidEditorHtml, IDimStatusBanner } from './editorManager';
 import { DimGenerationStatus, DimGenerationStep } from './dimGenerate';
 import { dimFocusSymbol, IDimNavigateTarget, resolveDimNavigation } from './dimNavigate';
-import { IDimLink, parseDimReadme, parseDimRecord } from './dimRecord';
+import { IDimChange, IDimLink, IDimTestCase, parseDimDiff, parseDimReadme, parseDimRecord, parseDimTests } from './dimRecord';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
 import { MermaidWebviewManager } from './webviewManager';
@@ -62,8 +62,14 @@ interface IDimViewEntry {
 	readonly text?: string;
 	/** Set on the README view when the file has no overview yet. */
 	readonly placeholder?: boolean;
+	/** On the README view of a test file: its tests, shown as a table under the overview. */
+	readonly tests?: readonly IDimTestCase[];
 	/** For a diagram: what each of its clickable elements stands for in the code. */
 	readonly links?: readonly IDimLink[];
+	/** For a diagram: the elements the file's uncommitted changes touched. */
+	readonly changes?: readonly IDimChange[];
+	/** For a diagram of a file that is new since the last commit: all of it is added. */
+	readonly isNew?: boolean;
 }
 
 /** An open Dim editor: its panel, the record it reads, its views and the one shown. */
@@ -334,11 +340,11 @@ function isBigPictureRecord(uri: vscode.Uri): boolean {
  * record has none yet the view is an empty placeholder; the status banner fills it
  * while a generation run is in progress or has failed.
  */
-function buildReadmeView(readme: string | undefined): IDimViewEntry {
+function buildReadmeView(readme: string | undefined, tests?: readonly IDimTestCase[]): IDimViewEntry {
 	if (readme && readme.length > 0) {
-		return { type: readmeViewType, label: vscode.l10n.t('README'), text: readme };
+		return { type: readmeViewType, label: vscode.l10n.t('README'), text: readme, tests };
 	}
-	return { type: readmeViewType, label: vscode.l10n.t('README'), text: '', placeholder: true };
+	return { type: readmeViewType, label: vscode.l10n.t('README'), text: '', placeholder: true, tests };
 }
 
 /**
@@ -355,6 +361,8 @@ async function loadViews(recordUri: vscode.Uri): Promise<IDimViewEntry[]> {
 		content = undefined;
 	}
 	const readme = content !== undefined ? parseDimReadme(content) : undefined;
+	const tests = content !== undefined ? parseDimTests(content) : undefined;
 	const diagrams = content !== undefined ? parseDimRecord(content) : [];
-	return [buildReadmeView(readme), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid, links: d.links }))];
+	const isNew = content !== undefined && !!parseDimDiff(content)?.isNew;
+	return [buildReadmeView(readme, tests), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid, links: d.links, changes: d.changes, isNew }))];
 }

@@ -4,9 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { Disposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
+import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
-import { relativePath } from '../../../../base/common/resources.js';
+import { joinPath, relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
@@ -71,6 +72,21 @@ const RESOLVE_RECORD_COMMAND = '_dim.resolveRecord';
  * the generator itself no-ops when the record is already current.
  */
 const GENERATE_RECORD_COMMAND = '_dim.generateRecord';
+
+/**
+ * Command the `mermaid-markdown-features` extension registers to bring a workspace
+ * folder's `.dim` records in line with its git HEAD: once a file's changes are committed,
+ * its diagrams drop their change colors and removed elements. Fired here on startup and
+ * whenever the folder's HEAD moves. It runs in the extension host because it shells out
+ * to git. Duplicated as `syncDiffsCommand` in the extension's `dimDiff`; keep the two in sync.
+ */
+const SYNC_DIFFS_COMMAND = '_dim.syncDiffs';
+
+/**
+ * How long to wait after HEAD moves before syncing, so the burst of writes one git
+ * operation makes (or a rebase's many commits) causes a single sync.
+ */
+const SYNC_DIFFS_DELAY = 1000;
 
 /**
  * Command the diagram viewer runs when a click in a diagram resolves to another Dim
@@ -181,6 +197,9 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	 */
 	private readonly _generating = new Set<string>();
 
+	/** Each workspace folder's watch on its git HEAD, keyed by folder URI. */
+	private readonly _commitWatchers = this._register(new DisposableMap<string>());
+
 	constructor(
 		@IEditorService private readonly _editorService: IEditorService,
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
@@ -215,6 +234,46 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		}));
 		this._register(this._contextService.onDidChangeWorkspaceFolders(e => this._syncRecordsGitignore(e.added.map(folder => folder.uri))));
 		this._syncRecordsGitignore(this._contextService.getWorkspace().folders.map(folder => folder.uri));
+
+		// Reset the change colors of committed files: watch each folder's git HEAD.
+		this._register(this._contextService.onDidChangeWorkspaceFolders(e => {
+			for (const folder of e.removed) {
+				this._commitWatchers.deleteAndDispose(folder.uri.toString());
+			}
+			for (const folder of e.added) {
+				this._watchCommits(folder.uri);
+			}
+		}));
+		for (const folder of this._contextService.getWorkspace().folders) {
+			this._watchCommits(folder.uri);
+		}
+	}
+
+	/**
+	 * Syncs a workspace folder's records with its git HEAD (see {@link SYNC_DIFFS_COMMAND})
+	 * now, to catch commits made while Dim was closed, and again each time HEAD moves.
+	 * HEAD's reflog (`.git/logs/HEAD`) gains a line on every commit, checkout and reset,
+	 * so it is the one file to watch. A folder with no records folder is skipped.
+	 */
+	private _watchCommits(folder: URI): void {
+		const store = new DisposableStore();
+		this._commitWatchers.set(folder.toString(), store);
+		const sync = store.add(new RunOnceScheduler(() => {
+			const recordsUri = dimHookStorageDir(folder);
+			void (async () => {
+				if (await this._fileService.exists(recordsUri)) {
+					await this._commandService.executeCommand(SYNC_DIFFS_COMMAND, { folderUri: folder.toString(), recordsUri: recordsUri.toString() });
+				}
+			})();
+		}, SYNC_DIFFS_DELAY));
+		const headLog = joinPath(folder, '.git', 'logs', 'HEAD');
+		const watcher = store.add(this._fileService.createWatcher(headLog, { recursive: false, excludes: [] }));
+		store.add(watcher.onDidChange(e => {
+			if (e.contains(headLog)) {
+				sync.schedule();
+			}
+		}));
+		sync.schedule();
 	}
 
 	/** Whether {@link DIM_DIAGRAMS_GITIGNORE_SETTING} asks git to ignore a workspace folder's records. */
@@ -477,11 +536,11 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		// The checked view is the one the diagram viewer shows, or Raw for the text editor.
 		const viewInput = ref.recordActive ? this._dimInput(editor) : undefined;
 		const current = viewInput ? this._shownView(viewInput) : ref.recordActive ? README_VIEW_ID : 'raw';
-		// Raw first (the editable source), then the README overview (always available),
+		// The README overview first (always available), then Raw (the editable source),
 		// then one entry per diagram the record holds.
 		const options: IDimDiagramViewOption[] = [
-			{ id: 'raw', label: rawViewTitle(), commandId: RAW_COMMAND_ID, checked: current === 'raw' },
 			{ id: README_VIEW_ID, label: readmeViewTitle(), commandId: README_COMMAND_ID, checked: current === README_VIEW_ID },
+			{ id: 'raw', label: rawViewTitle(), commandId: RAW_COMMAND_ID, checked: current === 'raw' },
 		];
 		for (const type of dimDiagramTypeOrder) {
 			if (diagrams.some(d => d.type === type)) {

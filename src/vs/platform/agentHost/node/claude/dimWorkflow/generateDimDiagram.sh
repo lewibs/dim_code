@@ -29,10 +29,21 @@
 #   $5  FOCUS_SYMBOL - optional, with $4: the symbol, e.g. Session.state.
 # The focus kinds mirror `DimFocusKind` in dimHookStorage.ts; keep the two in sync.
 #
+# Environment:
+#   DIM_DIFF_BASE - optional: the git revision the diagrams show changes against
+#                   (default HEAD, i.e. the changes not committed yet). Lets another
+#                   caller draw the changes between two versions instead.
+#
 # Regeneration is gated on the source's content hash, which is stamped into the
 # record as `sourceHash`: the record is (re)generated only when it does not exist
 # yet or when the source has changed since it was last generated, so repeated
 # opens of an unchanged file cost nothing.
+#
+# When the file differs from the diff base, the diagrams also mark what changed
+# (see "Showing changes" in the diagram-writing skill), and the record is stamped
+# with a `diff` object naming the base commit. Committing the changes resets the
+# record without regenerating it: the editor drops the marks and the removed
+# elements (see `dimDiff.ts` in the mermaid-markdown-features extension).
 #
 # Exit status tells the caller what happened, so the editor can show it (the agent
 # hook ignores it). On a failure, stderr carries any detail (e.g. Claude's error).
@@ -74,12 +85,62 @@ hashSource() {
 }
 srcHash=$(hashSource "$SRC")
 
-# Already up to date for this exact source content: nothing to do.
+# A test file's README also lists its tests (see the TESTS block of the prompt below).
+# Recognized by the common naming conventions for test files and test folders.
+isTestFile=0
+case "$REL" in
+	*.test.* | *.spec.* | *_test.* | test_* | */test_* | test/* | tests/* | */test/* | */tests/* | */__tests__/*)
+		isTestFile=1
+		;;
+esac
+# A focused view describes one symbol, not the file, so it gets no tests table.
+[ -n "$FOCUS_KIND" ] && isTestFile=0
+
+# How the file differs from the diff base, so the diagrams can show it:
+#   none    - not in a git repository, no base commit yet, or an ignored new file;
+#   clean   - the same as in the base;
+#   changed - edited since the base ($diffText holds the diff);
+#   new     - not in the base at all.
+# Run from the file's own folder with its bare name, so the workspace does not have
+# to be the repository root.
+diffState=none
+diffText=""
+baseSha=""
+srcDir=$(dirname "$SRC")
+srcName=$(basename "$SRC")
+if git -C "$srcDir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	baseSha=$(git -C "$srcDir" rev-parse --verify -q "${DIM_DIFF_BASE:-HEAD}^{commit}" 2>/dev/null)
+	if [ -n "$baseSha" ]; then
+		if git -C "$srcDir" cat-file -e "$baseSha:./$srcName" 2>/dev/null; then
+			diffText=$(git -C "$srcDir" diff --no-color --no-ext-diff "$baseSha" -- "$srcName" 2>/dev/null | head -c 30000)
+			if [ -n "$diffText" ]; then
+				diffState=changed
+			else
+				diffState=clean
+			fi
+		elif ! git -C "$srcDir" check-ignore -q -- "$srcName" 2>/dev/null; then
+			diffState=new
+		fi
+	fi
+fi
+
+# Already up to date for this exact source content: nothing to do. A test file's record
+# from before the tests table existed has no "tests" field; regenerate it once so it
+# gains one (the generator always writes the field for a test file, even when empty).
+# Likewise a record must show changes exactly when the file has them: one drawn before
+# the file was edited (e.g. from before changes were shown) is regenerated to mark them.
+# A record whose changes were committed since is reset by the editor, not regenerated.
 if [ -f "$OUT" ]; then
 	existingHash=$(sed -n 's/.*"sourceHash"[[:space:]]*:[[:space:]]*"\([0-9a-zA-Z]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n1)
-	if [ -n "$existingHash" ] && [ "$existingHash" = "$srcHash" ]; then
-		echo "generateDimDiagram: $REL unchanged; keeping existing record."
-		exit 0
+	hasDiff=0
+	grep -q '[{,[:space:]]"diff"[[:space:]]*:' "$OUT" 2>/dev/null && hasDiff=1
+	wantsDiff=0
+	case "$diffState" in changed | new) wantsDiff=1 ;; esac
+	if [ -n "$existingHash" ] && [ "$existingHash" = "$srcHash" ] && [ "$hasDiff" = "$wantsDiff" ]; then
+		if [ "$isTestFile" = 0 ] || grep -q '"tests"[[:space:]]*:' "$OUT" 2>/dev/null; then
+			echo "generateDimDiagram: $REL unchanged; keeping existing record."
+			exit 0
+		fi
 	fi
 fi
 
@@ -260,6 +321,46 @@ FOCUS: this is a focused view. Document ONLY the ${FOCUS_KIND} \"${FOCUS_SYMBOL}
 		;;
 esac
 
+# A test file additionally gets a "tests" table in its README: one row per test, saying
+# what it checks, its input, the expected result and what it mocks, so a reader can see
+# at a glance what is tested and how much of the real code each test exercises.
+testsBlock=""
+testsShape=""
+if [ "$isTestFile" = 1 ]; then
+	testsBlock='
+TESTS: this is a test file. Also output a "tests" array with one entry per test case (every test/it call, in file order; expand a table-driven loop into one entry per case when the cases are listed in the file). Each entry has:
+- "suite": the enclosing suite/describe names joined with " > " ("" when there is none);
+- "name": the test name exactly as written;
+- "checks": what behavior or rule the test verifies, in plain words (not a restatement of the name);
+- "input": the concrete input or setup the code under test is driven with (values, fixtures, state);
+- "expected": the concrete result the test asserts (return value, thrown error, emitted event, final state);
+- "mocks": everything the test replaces with a mock, stub, spy, fake or test double instead of the real implementation (e.g. "IFileService (in-memory fake)", "Date.now (stubbed)", "fetch (sinon stub)"), including ones created in a shared setup/beforeEach the test relies on; [] when the test runs only real code. Do not count plain test data, fixtures or real in-memory implementations shipped by the product as mocks.
+Keep each field short (one sentence or a compact value). Output "tests": [] if the file contains no tests.
+'
+	testsShape=',"tests":[{"suite":"...","name":"...","checks":"...","input":"...","expected":"...","mocks":["..."]}]'
+fi
+
+# Changes since the diff base are marked in the diagrams (see "Showing changes" in the
+# skill). A new file is shown as wholly added by the viewer, so it needs no marks.
+changesBlock=""
+changesShape=""
+case "$diffState" in
+	changed)
+		changesBlock="
+CHANGES: this file has changes since its last commit. The diff below goes from the committed code (\"-\" lines) to the current code (\"+\" lines, the CODE above). Show the changes in every diagram as the skill's \"Showing changes\" section and your kind's skill describe: list each added, changed and removed element in the diagram's \"changes\", and keep each removed element drawn, wrapped in \"%% dim:removed\" / \"%% dim:end\" lines. The readme still describes only the current code: do not mention the changes or the diff in it, as it is kept after they are committed.
+--- BEGIN DIFF ---
+$diffText
+--- END DIFF ---
+"
+		changesShape=',"changes":[{"label":"Foo.bar","change":"added"}]'
+		;;
+	new)
+		changesBlock="
+CHANGES: this file is new since the last commit. The viewer shows the whole diagram as added, so output no \"changes\" and no removed markers.
+"
+		;;
+esac
+
 prompt=$(cat <<PROMPT_HEADER
 You document source files shown inside an IDE. For the code below, do two things: (1) write a plain-English description of what the file is for and the role/intent of its main class, functions or module, and (2) draw the Mermaid diagram(s) that genuinely help someone understand THIS code.
 
@@ -276,8 +377,8 @@ Output rules:
 - "diagrams" holds only the views that genuinely help (often just one), each a distinct type; never add a type just to have more.
 - Each diagram has a "links" list that maps every box, member, participant and message it draws to the code it stands for, as the skill's links section describes. "file" is the workspace-relative path: "$REL" for this file's own symbols, and the "file:" path shown for each imported definition.
 - Output ONLY a JSON object, no markdown fences and no prose outside it, shaped EXACTLY like (note the leading "{"):
-  {"readme":"...","diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"$REL"}]},{"type":"sequenceDiagram","label":"Behavior","mermaid":"sequenceDiagram\n ...","links":[]}]}
-${focusBlock}
+  {"readme":"..."${testsShape},"diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"$REL"}]${changesShape}},{"type":"sequenceDiagram","label":"Behavior","mermaid":"sequenceDiagram\n ...","links":[]}]}
+${focusBlock}${testsBlock}${changesBlock}
 File: $REL
 --- BEGIN CODE ---
 $code
@@ -320,12 +421,25 @@ fi
 progress saving
 
 # Wrap the model's object into the record by injecting our fields right after its
-# opening brace, keeping the model's "readme" and "diagrams" fields intact. Only the
+# opening brace, keeping the model's "readme", "tests" and "diagrams" fields intact. Only the
 # first "{" (the object opener) on line 1 is touched, so a brace anywhere inside the
 # readme text is left alone. `$REL`/`$srcHash` contain no JSON-special characters; the
 # `|` delimiter avoids the "/" in relative paths.
+# A test file's record must always carry a "tests" field, or the freshness check above
+# would regenerate it on every open; add an empty one when the model left it out.
+testsField=""
+if [ "$isTestFile" = 1 ] && ! printf '%s' "$result" | grep -q '"tests"[[:space:]]*:'; then
+	testsField=' "tests": [],'
+fi
+# A file with changes is stamped with the commit they are measured against, which tells
+# the editor when they have been committed (see the header). `$baseSha` is plain hex.
+diffField=""
+case "$diffState" in
+	changed) diffField=" \"diff\": {\"base\": \"$baseSha\", \"new\": false}," ;;
+	new) diffField=" \"diff\": {\"base\": \"$baseSha\", \"new\": true}," ;;
+esac
 tmp="$OUT.tmp.$$"
 printf '%s\n' "$result" \
-	| sed "1 s|{|{\"version\": 1, \"source\": \"$REL\", \"sourceHash\": \"$srcHash\",|" \
+	| sed "1 s|{|{\"version\": 1, \"source\": \"$REL\", \"sourceHash\": \"$srcHash\",$diffField$testsField|" \
 	> "$tmp" && mv "$tmp" "$OUT"
 echo "generateDimDiagram: generated diagram and overview for $REL"

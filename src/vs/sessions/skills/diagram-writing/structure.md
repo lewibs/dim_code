@@ -14,3 +14,8 @@
 - Group standalone functions under a single class box named for the module when there is no real class.
 
 **Avoid:** empty boxes for referenced types (populate them from the imported definitions), and dumping every field and method — select what explains the type.
+
+**Showing changes** (see "Showing changes" in the main skill):
+- A new class or interface is `added` by its name; a deleted one stays drawn, wrapped whole (its `class` block and every relationship line that touches it) in a removed pair.
+- A new, edited or deleted method or field is marked as `Box.member`. A member whose body changed but whose signature did not is still `changed`. A deleted member stays in its class block, wrapped in a removed pair inside the block.
+- Relationship lines cannot be colored on their own. To show a changed relationship, give it a label and mark that label. Wrap a removed relationship line in a removed pair.

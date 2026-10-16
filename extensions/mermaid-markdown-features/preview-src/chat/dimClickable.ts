@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { clickedNames } from '../../src/dimNames';
 
 /**
  * A place a diagram click should navigate to. This is only the *shape* of the request:
@@ -30,6 +31,25 @@ export type DimNavigate = (target: DimNavigateTarget) => void;
 const boundAttr = 'dimClickBound';
 
 /**
+ * How a drawn element is shown: `node` is a box (its shape is filled), `text` a line of
+ * text inside or beside one (a member row, a message, an edge label), and `line` a
+ * sequence message's arrow.
+ */
+type DimElementRole = 'node' | 'text' | 'line';
+
+/** Receives each element {@link visitDiagramElements} finds, with what it stands for. */
+type DimElementVisitor = (el: Element, target: DimNavigateTarget, role: DimElementRole) => void;
+
+/**
+ * How a diagram element changed since the diff base, and so how it is colored. Mirrors
+ * `IDimChange` in the extension's `src/dimRecord.ts`; keep the two in sync.
+ */
+export interface DimChange {
+	readonly label: string;
+	readonly change: 'added' | 'changed' | 'removed';
+}
+
+/**
  * Makes the boxes and the individual text lines of a rendered mermaid diagram
  * clickable, so one diagram can carry *many* independent click targets per box — the
  * box itself, plus each attribute and method inside it — instead of mermaid's single
@@ -48,17 +68,55 @@ export function enhanceDiagramClickability(root: HTMLElement, navigate: DimNavig
 	if (!svg) {
 		return;
 	}
+	// A box lets a click on its background through to it; anything inside or on top of a
+	// box (a member row, a message) stops the click so it wins over the box.
+	visitDiagramElements(svg, (el, target, role) => bind(role === 'line' ? widenHitArea(el) : el, target, navigate, shouldSuppress, role !== 'node'));
+}
+
+/**
+ * Colors the elements of a rendered diagram that changed since the diff base: green for
+ * added, yellow for changed, red (and struck through) for removed. Each change names an
+ * element the way a link does (see "Showing changes" in the `diagram-writing` skill); a
+ * member is matched only by its qualified `Box.member` name, so a same-named member of
+ * another box is never colored by mistake. Safe to call after every (re-)render.
+ *
+ * @param root The element the diagram's `<svg>` was rendered into.
+ * @param changes The diagram's changes; ignored when `isNew` is set.
+ * @param isNew The whole file is new since the diff base, so every element is added.
+ */
+export function markDiagramChanges(root: HTMLElement, changes: readonly DimChange[], isNew: boolean): void {
+	const svg = root.querySelector('svg');
+	if (!svg || (!isNew && changes.length === 0)) {
+		return;
+	}
+	const byLabel = new Map(changes.map(change => [change.label, change.change]));
+	visitDiagramElements(svg, (el, target, role) => {
+		const names = clickedNames(target);
+		const candidates = target.kind === 'member' && target.node ? names.slice(0, 1) : [...names, target.member ?? target.node];
+		const change = isNew ? 'added' : candidates.map(name => byLabel.get(name)).find(found => !!found);
+		if (change) {
+			el.classList.add('dim-change', `dim-change-${change}`, `dim-change-${role}`);
+		}
+	});
+}
+
+/**
+ * Finds the elements of a rendered diagram that stand for code — its boxes, the lines of
+ * text inside them, its messages and edge labels — and reports each with what it stands
+ * for. Shared by clickability and change coloring, so both treat the same elements.
+ */
+function visitDiagramElements(svg: SVGSVGElement, visit: DimElementVisitor): void {
 	const diagramType = detectDiagramType(svg);
 	if (diagramType === 'classDiagram') {
-		enhanceClassNodes(svg, diagramType, navigate, shouldSuppress);
+		visitClassNodes(svg, diagramType, visit);
 	} else if (diagramType === 'sequenceDiagram') {
-		enhanceSequence(svg, diagramType, navigate, shouldSuppress);
+		visitSequence(svg, diagramType, visit);
 	} else {
 		// flowchart / stateDiagram / erDiagram and anything else: each node is one box.
-		enhanceSimpleNodes(svg, diagramType, navigate, shouldSuppress);
+		visitSimpleNodes(svg, diagramType, visit);
 	}
 	// Edge labels (a state transition's `start()`, a call edge's label) name code too.
-	enhanceEdgeLabels(svg, diagramType, navigate, shouldSuppress);
+	visitEdgeLabels(svg, diagramType, visit);
 }
 
 /** Reads mermaid's own `aria-roledescription` and maps it to a catalog keyword. */
@@ -81,32 +139,29 @@ function textOf(el: Element | null | undefined): string {
  * A class diagram: each `g.node` is a box (→ the class's source file), and every line
  * in its members and methods groups is an independent target (→ that member's `.dim`).
  */
-function enhanceClassNodes(svg: SVGSVGElement, diagramType: string, navigate: DimNavigate, shouldSuppress: () => boolean): void {
+function visitClassNodes(svg: SVGSVGElement, diagramType: string, visit: DimElementVisitor): void {
 	svg.querySelectorAll('g.node, g.classGroup').forEach(node => {
 		const name = classNameFromNode(node);
 		if (!name) {
 			return;
 		}
-		// The whole box → the class. Bound without stopping propagation so a click that
-		// lands on the box background (not on a member row) reaches this handler.
-		bind(node, { kind: 'node', node: name, diagramType }, navigate, shouldSuppress, false);
+		// The whole box → the class.
+		visit(node, { kind: 'node', node: name, diagramType }, 'node');
 
-		// Each attribute / method row → that member. Bound on the row's `g.label` (a wide
-		// hit area) and stops propagation so the member wins over the enclosing box.
-		bindMembers(node.querySelectorAll('.members-group .nodeLabel, .members .nodeLabel'), 'attribute', name, diagramType, navigate, shouldSuppress);
-		bindMembers(node.querySelectorAll('.methods-group .nodeLabel, .methods .nodeLabel'), 'method', name, diagramType, navigate, shouldSuppress);
+		// Each attribute / method row → that member, on the row's `g.label` (a wide hit area).
+		visitMembers(node.querySelectorAll('.members-group .nodeLabel, .members .nodeLabel'), 'attribute', name, diagramType, visit);
+		visitMembers(node.querySelectorAll('.methods-group .nodeLabel, .methods .nodeLabel'), 'method', name, diagramType, visit);
 	});
 }
 
-/** Binds one click target per member label in `labels`, on its enclosing row. */
-function bindMembers(labels: NodeListOf<Element>, memberKind: 'attribute' | 'method', node: string, diagramType: string, navigate: DimNavigate, shouldSuppress: () => boolean): void {
+/** Reports one element per member label in `labels`: its enclosing row. */
+function visitMembers(labels: NodeListOf<Element>, memberKind: 'attribute' | 'method', node: string, diagramType: string, visit: DimElementVisitor): void {
 	labels.forEach(label => {
 		const member = textOf(label);
 		if (!member) {
 			return;
 		}
-		const row = label.closest('g.label') ?? label;
-		bind(row, { kind: 'member', node, member, memberKind, diagramType }, navigate, shouldSuppress, true);
+		visit(label.closest('g.label') ?? label, { kind: 'member', node, member, memberKind, diagramType }, 'text');
 	});
 }
 
@@ -125,12 +180,12 @@ function classNameFromNode(node: Element): string {
  * target (→ the file it lives in), and each message — its text and its arrow — is a
  * target (→ the call it stands for).
  */
-function enhanceSequence(svg: SVGSVGElement, diagramType: string, navigate: DimNavigate, shouldSuppress: () => boolean): void {
+function visitSequence(svg: SVGSVGElement, diagramType: string, visit: DimElementVisitor): void {
 	svg.querySelectorAll('text.actor, .actor-box, .actor-man, rect.actor').forEach(actor => {
 		// A participant's rectangle has no text of its own: take its sibling name.
 		const name = textOf(actor) || textOf(actor.parentElement?.querySelector('text.actor'));
 		if (name) {
-			bind(actor, { kind: 'node', node: name, diagramType }, navigate, shouldSuppress, false);
+			visit(actor, { kind: 'node', node: name, diagramType }, actor.tagName.toLowerCase() === 'text' ? 'text' : 'node');
 		}
 	});
 	// Mermaid draws one arrow per message, in the same order as the texts. Pair them up
@@ -147,9 +202,9 @@ function enhanceSequence(svg: SVGSVGElement, diagramType: string, navigate: DimN
 		}
 		const arrow = paired ? arrows[index] : undefined;
 		const target: DimNavigateTarget = { kind: 'member', node: '', member, memberKind: 'method', receiver: arrow && receiverOf(arrow, lifelines), diagramType };
-		bind(message, target, navigate, shouldSuppress, true);
+		visit(message, target, 'text');
 		if (arrow) {
-			bind(widenHitArea(arrow), target, navigate, shouldSuppress, true);
+			visit(arrow, target, 'line');
 		}
 	});
 }
@@ -184,11 +239,11 @@ function receiverOf(arrow: Element, lifelines: readonly { readonly name: string;
  * Edge labels, in any diagram: a state transition's trigger (`start()`), a call or
  * dependency edge's label. Each is a target for the code it names, if any.
  */
-function enhanceEdgeLabels(svg: SVGSVGElement, diagramType: string, navigate: DimNavigate, shouldSuppress: () => boolean): void {
+function visitEdgeLabels(svg: SVGSVGElement, diagramType: string, visit: DimElementVisitor): void {
 	svg.querySelectorAll('g.edgeLabel').forEach(label => {
 		const member = textOf(label);
 		if (member) {
-			bind(label, { kind: 'member', node: '', member, diagramType }, navigate, shouldSuppress, true);
+			visit(label, { kind: 'member', node: '', member, diagramType }, 'text');
 		}
 	});
 }
@@ -215,11 +270,11 @@ function widenHitArea(arrow: Element): Element {
 }
 
 /** Flowchart / state / ER and other diagrams: each `g.node` box is a single target. */
-function enhanceSimpleNodes(svg: SVGSVGElement, diagramType: string, navigate: DimNavigate, shouldSuppress: () => boolean): void {
+function visitSimpleNodes(svg: SVGSVGElement, diagramType: string, visit: DimElementVisitor): void {
 	svg.querySelectorAll('g.node, .statediagram-state, .er.entityBox').forEach(node => {
 		const name = textOf(node.querySelector('.nodeLabel')) || textOf(node);
 		if (name) {
-			bind(node, { kind: 'node', node: name, diagramType }, navigate, shouldSuppress, false);
+			visit(node, { kind: 'node', node: name, diagramType }, 'node');
 		}
 	});
 }

@@ -14,3 +14,8 @@
 - The text after the colon labels the relationship (`places`, `contains`).
 
 **Avoid:** using it for plain object/class structure that isn't a data schema (that is Structure), and drawing entities with no relationships between them.
+
+**Showing changes** (see "Showing changes" in the main skill):
+- A new, changed or deleted entity is marked by its name. A new, retyped or deleted attribute is marked as `ENTITY.attribute` and colors its whole entity, since attribute rows cannot be colored on their own; mark the entity `changed` too.
+- A removed attribute stays in its entity block, wrapped in a removed pair inside the block. A removed entity is wrapped whole, together with every relationship line that touches it.
+- A changed relationship is marked by its label (the text after the `:`), and a removed one is wrapped in a removed pair.

@@ -14,3 +14,8 @@
 - Nest sub-states with `state Parent { ... }` when a mode has its own internal modes.
 
 **Avoid:** modelling control flow of one call as states (that is Logic), and listing modes with no transitions — the transitions and their triggers are the whole point.
+
+**Showing changes** (see "Showing changes" in the main skill):
+- A new or deleted state is marked by its name, a changed one when what it means or who enters it changed.
+- A transition is marked by its label (`start()` for `Idle --> Running : start()`), so label every transition that changed. A removed transition stays drawn, wrapped in a removed pair.
+- A removed state stays drawn, wrapped in one removed pair together with every transition into or out of it; a removed composite state is wrapped whole, from `state X {` to its `}`.

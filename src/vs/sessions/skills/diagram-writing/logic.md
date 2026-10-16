@@ -14,3 +14,9 @@
 - Keep loops explicit — route an edge back to the loop head.
 
 **Avoid:** flowcharting a function that just calls collaborators in sequence (that is Behavior), and restating the whole module's structure (that is Structure).
+
+**Showing changes** (see "Showing changes" in the main skill):
+- A new or edited step or decision is marked by its node's displayed text (its label, not its id). Use a label for each node rather than a bare id, so it can be named.
+- A removed step stays drawn, its node and every edge into or out of it wrapped in one removed pair. Edges that now bypass it are drawn as usual.
+- Edges are colored only through their labels: mark an edge's label when the condition it shows was added, changed or removed.
+- A removed subgraph is wrapped whole, from `subgraph` to its `end`.
