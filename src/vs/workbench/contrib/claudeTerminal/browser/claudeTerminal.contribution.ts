@@ -152,10 +152,8 @@ class ClaudeTerminalViewPane extends ViewPane {
 			const root = joinPath(this._environmentService.userRoamingDataHome, 'claudeTerminal', 'builtinPlugin');
 			const manifestDir = joinPath(root, '.claude-plugin');
 			const hooksDir = joinPath(root, 'hooks');
-			const skillDir = joinPath(root, 'skills', 'diagram-writing');
 			await this._fileService.createFolder(manifestDir);
 			await this._fileService.createFolder(hooksDir);
-			await this._fileService.createFolder(skillDir);
 
 			const manifest = {
 				name: 'dim-builtin',
@@ -198,16 +196,19 @@ class ClaudeTerminalViewPane extends ViewPane {
 			await this._fileService.writeFile(joinPath(hooksDir, 'updateDimHook.sh'), (await this._fileService.readFile(hookSource)).value);
 			await this._fileService.writeFile(joinPath(hooksDir, 'generateDimDiagram.sh'), (await this._fileService.readFile(generatorSource)).value);
 
-			// Copy the whole diagram-writing skill — the general SKILL.md (which holds the
-			// method and the catalog of kinds the generator reads) plus every per-kind diagram
-			// skill (one markdown file per kind). The generator resolves these from
-			// `../skills/diagram-writing/` relative to its hooks folder and injects the matching
-			// kind's instructions into its prompt.
-			const skillSourceDir = FileAccess.asFileUri('vs/sessions/skills/diagram-writing');
-			const skillEntries = await this._fileService.resolve(skillSourceDir);
-			for (const child of skillEntries.children ?? []) {
-				if (!child.isDirectory && child.name.endsWith('.md')) {
-					await this._fileService.writeFile(joinPath(skillDir, child.name), (await this._fileService.readFile(child.resource)).value);
+			// Copy each terminal skill's markdown files whole. For diagram-writing that is the
+			// general SKILL.md (which holds the method and the catalog of kinds the generator
+			// reads) plus every per-kind diagram skill (one markdown file per kind). The
+			// generator resolves these from `../skills/diagram-writing/` relative to its hooks
+			// folder and injects the matching kind's instructions into its prompt.
+			for (const skillName of ['diagram-writing', 'open-files', 'big-picture']) {
+				const skillDir = joinPath(root, 'skills', skillName);
+				await this._fileService.createFolder(skillDir);
+				const skillEntries = await this._fileService.resolve(FileAccess.asFileUri(`vs/sessions/skills/${skillName}`));
+				for (const child of skillEntries.children ?? []) {
+					if (!child.isDirectory && child.name.endsWith('.md')) {
+						await this._fileService.writeFile(joinPath(skillDir, child.name), (await this._fileService.readFile(child.resource)).value);
+					}
 				}
 			}
 
