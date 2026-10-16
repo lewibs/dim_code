@@ -10,7 +10,7 @@ import { VSBuffer } from '../../../../base/common/buffer.js';
 import { IMarkdownString } from '../../../../base/common/htmlContent.js';
 import { IReference } from '../../../../base/common/lifecycle.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
-import { Emitter } from '../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
 import { Range } from '../../../../editor/common/core/range.js';
 import { Selection, SelectionDirection } from '../../../../editor/common/core/selection.js';
 import { Schemas } from '../../../../base/common/network.js';
@@ -26,7 +26,7 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { IUndoRedoService } from '../../../../platform/undoRedo/common/undoRedo.js';
-import { EditorInputCapabilities, GroupIdentifier, IMoveResult, IRevertOptions, ISaveOptions, IUntypedEditorInput, Verbosity, createEditorOpenError } from '../../../common/editor.js';
+import { EditorInputCapabilities, EditorPaneSelectionChangeReason, GroupIdentifier, IEditorPaneSelectionChangeEvent, IMoveResult, IRevertOptions, ISaveOptions, IUntypedEditorInput, Verbosity, createEditorOpenError } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { ICustomEditorLabelService } from '../../../services/editor/common/customEditorLabelService.js';
 import { ICustomEditorModel, ICustomEditorService } from '../common/customEditor.js';
@@ -39,6 +39,7 @@ import { IUntitledTextEditorService } from '../../../services/untitled/common/un
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { WebviewIconPath } from '../../webviewPanel/browser/webviewEditorInput.js';
 import { ICustomTextEditorNavigation } from '../common/customTextEditorNavigation.js';
+import { CustomEditorViewSelection, customEditorViewFromOptions } from '../common/customEditorView.js';
 import { TextEditorPaneSelection } from '../../../browser/parts/editor/textEditor.js';
 
 interface CustomEditorInputInitInfo {
@@ -66,12 +67,46 @@ export class CustomEditorInput extends LazilyResolvedWebviewEditorInput {
 		}
 	}
 
-	override getSelection(): TextEditorPaneSelection | undefined {
+	private _view: string | undefined;
+	private readonly _onDidChangeView = this._register(new Emitter<IEditorPaneSelectionChangeEvent>());
+
+	/**
+	 * The view this editor shows, for a custom editor that shows its resource in several
+	 * ways (see {@link customEditorViewOptions}). `undefined` until one is set, meaning
+	 * the editor's default view.
+	 */
+	get view(): string | undefined {
+		return this._view;
+	}
+
+	/**
+	 * Records the view this editor shows. Navigation history records the change, so going
+	 * back returns to the view the editor was left on.
+	 */
+	setView(view: string, reason: EditorPaneSelectionChangeReason): void {
+		if (this._view !== view) {
+			this._view = view;
+			this._onDidChangeView.fire({ reason });
+		}
+	}
+
+	override get onDidChangeSelection(): Event<IEditorPaneSelectionChangeEvent> {
+		return this._onDidChangeView.event;
+	}
+
+	override getSelection(): TextEditorPaneSelection | CustomEditorViewSelection | undefined {
 		const selection = this.navigation?.selection;
-		return selection ? new TextEditorPaneSelection(Selection.liftSelection(selection)) : undefined;
+		if (selection) {
+			return new TextEditorPaneSelection(Selection.liftSelection(selection));
+		}
+		return this._view !== undefined ? new CustomEditorViewSelection(this._view) : undefined;
 	}
 
 	public override async applyOptions(options: ITextEditorOptions, token: CancellationToken): Promise<void> {
+		const view = customEditorViewFromOptions(options);
+		if (view !== undefined && !token.isCancellationRequested) {
+			this.setView(view, EditorPaneSelectionChangeReason.NAVIGATION);
+		}
 		const selection = options.selection;
 		if (this.navigation && selection && !token.isCancellationRequested) {
 			const range = new Range(selection.startLineNumber, selection.startColumn, selection.endLineNumber ?? selection.startLineNumber, selection.endColumn ?? selection.startColumn);

@@ -612,6 +612,8 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 				el.style.display = 'none';
 			}
 			diagram.classList.add('rendered');
+			// Still report ready, so the extension re-sends the latest status.
+			vscode.postMessage({ type: 'dimReady' });
 			return;
 		}
 		// Show the diagram now that it's rendered
@@ -660,6 +662,10 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 		return renderChain;
 	};
 
+	// The view the page shows, so a request for it again (the extension re-sends the
+	// current view once the page is ready) does not re-render it and reset pan/zoom.
+	let shownIndex = Number(document.body.dataset.dimIndex ?? 0);
+
 	// Listen for messages from the extension
 	window.addEventListener('message', async event => {
 		const message = event.data;
@@ -671,9 +677,10 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 		// either the README overview (plain prose) or a diagram (swapped in place).
 		if (message.type === 'dimSelectDiagram') {
 			const selected = readDimViews()[message.index];
-			if (!selected) {
+			if (!selected || message.index === shownIndex) {
 				return;
 			}
+			shownIndex = message.index;
 			if (typeof selected.text === 'string') {
 				// Show the README overview and hide the diagram surface and its controls.
 				// Only the text is swapped; the status banner above it stays as it is.
@@ -713,6 +720,10 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 			}
 		}
 	});
+
+	// Messages the extension posted while this script loaded were dropped. Now that both
+	// listeners are in place, ask it to re-send the view to show and the latest status.
+	vscode.postMessage({ type: 'dimReady' });
 
 	// Re-render when the active VS Code theme changes. The tracker watches DOM mutations on the
 	// body (theme class / data attributes) and the document element (inline CSS variable updates

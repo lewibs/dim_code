@@ -36,11 +36,13 @@ dim_open() {
 		return
 	fi
 	# Dev build (./scripts/code.sh): run the build's own CLI. It forwards to the running instance over its main socket.
+	# "$root" right after cli.js is Electron's app path (the Dim sources), not a folder to open: without it the
+	# launched process never reaches the running window and hangs.
 	local exe root
 	exe=$(ps -eo args= | awk '$1 ~ /\/\.build\/electron\/(dim|Dim\.app\/Contents\/MacOS\/Dim)$/ { print $1; exit }')
 	if [ -n "$exe" ]; then
 		root=${exe%%/.build/electron/*}
-		ELECTRON_RUN_AS_NODE=1 VSCODE_DEV=1 NODE_ENV=development "$exe" "$root/out/cli.js" -r -g "$@" >/dev/null 2>&1
+		ELECTRON_RUN_AS_NODE=1 VSCODE_DEV=1 NODE_ENV=development timeout 30 "$exe" "$root/out/cli.js" "$root" -r -g "$@" >/dev/null 2>&1
 		return
 	fi
 	echo "dim_open: no running Dim instance found" >&2
@@ -53,5 +55,6 @@ Notes:
 
 - `-r` reuses the last active Dim window. `-g` accepts `file:line[:column]`.
 - Always pass absolute paths. Relative paths may be resolved against the wrong directory.
-- In the dev build, don't use `scripts/code-cli.sh`. It always passes the Dim repo folder (`.`) as well, and with `-r` that can replace the user's open workspace.
+- In the dev build, the function does what `scripts/code-cli.sh` does, but without that script's build step and without changing directory.
+- An exit code of 0 doesn't prove the file opened. If the user says nothing appeared, check `ps -eo pid,args | grep 'electron/dim -r'`: a launcher process still alive there never reached the window.
 - If the command fails or finds no Dim instance, answer anyway with `path:line` references and mention in one line that the files couldn't be opened.

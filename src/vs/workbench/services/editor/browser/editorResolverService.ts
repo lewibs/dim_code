@@ -186,11 +186,19 @@ export class EditorResolverService extends Disposable implements IEditorResolver
 		// problem) needs the text editor to reveal it. An editor that is only the default
 		// by its priority, such as a custom editor for the same files, cannot, so the
 		// text editor takes it, unless the user associated that editor with the files.
-		if (selectionSource === EditorSelectionSource.EditorPriority && editorAssociationType === EditorAssociationType.Editor && (untypedEditor.options as ITextEditorOptions | undefined)?.selection) {
+		const targetSelection = (untypedEditor.options as ITextEditorOptions | undefined)?.selection;
+		if (selectionSource === EditorSelectionSource.EditorPriority && editorAssociationType === EditorAssociationType.Editor && targetSelection) {
 			const textEditor = this.getEditor(resource, DEFAULT_EDITOR_ASSOCIATION.id, editorAssociationType);
 			if (textEditor.editor) {
 				selectedEditor = textEditor.editor;
 				conflictingDefault = false;
+				// A bare line (`file:12` from the command line or a terminal link) names a
+				// line rather than a range: select the whole line so it stands out.
+				if (targetSelection.endLineNumber === undefined && targetSelection.endColumn === undefined) {
+					const line = targetSelection.startLineNumber;
+					const lineOptions: ITextEditorOptions = { ...untypedEditor.options, selection: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: Number.MAX_SAFE_INTEGER } };
+					untypedEditor.options = lineOptions;
+				}
 			}
 		}
 		// If no editor was found and this was a typed editor or an editor with an explicit override we could not resolve it

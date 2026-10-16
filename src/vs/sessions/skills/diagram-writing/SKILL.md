@@ -61,6 +61,8 @@ Every box and every line of text in a Dim diagram is clickable. A click opens th
   - `file`: a module or file with no single symbol.
 - **`file`** is the workspace-relative path of the file that defines the symbol. Use the main file's path for its own symbols, and the paths given for the imported definitions for theirs. Leave `file` out only when the symbol's file is genuinely unknown (e.g. a library type); the editor then searches the workspace for it.
 - Link every box, member, participant and message that stands for real code. Skip pure prose (a flowchart step like "validate input", a return label like "ok").
+- **`view`** (optional) picks the view the link opens on, in place of the one its kind opens on: `readme`, `classDiagram`, `sequenceDiagram`, `flowchart`, `stateDiagram`, `erDiagram`, or `raw` for the file itself in the text editor. Use it when one view of the target answers what the element is about, e.g. `"view": "sequenceDiagram"` for a participant whose behavior matters more than its structure.
+- **`line`** and **`endLine`** (optional, 1-based) point at specific lines of `file`. A link with a line opens the file raw with those lines selected (just `line` when `endLine` is left out). Use them for an element that stands for a few lines rather than a symbol, such as a flowchart step that is one `if` in a long function. Give lines only when you read them from the file's current code.
 
 ## Focused views
 

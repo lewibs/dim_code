@@ -5,6 +5,7 @@
 
 import { CodeWindow } from '../../../../base/browser/window.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { Event } from '../../../../base/common/event.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -13,7 +14,7 @@ import { generateUuid } from '../../../../base/common/uuid.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { isDark } from '../../../../platform/theme/common/theme.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
-import { EditorInputCapabilities, GroupIdentifier, IEditorPaneSelection, IUntypedEditorInput, Verbosity } from '../../../common/editor.js';
+import { EditorInputCapabilities, GroupIdentifier, IEditorPaneSelection, IEditorPaneSelectionChangeEvent, IUntypedEditorInput, Verbosity } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IOverlayWebview } from '../../webview/browser/webview.js';
 
@@ -30,6 +31,11 @@ export class WebviewInput extends EditorInput {
 
 	public getSelection(): IEditorPaneSelection | undefined {
 		return undefined;
+	}
+
+	/** Fires when {@link getSelection} changes. */
+	public get onDidChangeSelection(): Event<IEditorPaneSelectionChangeEvent> {
+		return Event.None;
 	}
 
 	public static typeId = 'workbench.editors.webviewInput';

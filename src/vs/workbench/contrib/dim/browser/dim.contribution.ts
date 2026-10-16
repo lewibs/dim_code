@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -18,11 +18,13 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-import { DEFAULT_EDITOR_ASSOCIATION } from '../../../common/editor.js';
+import { DEFAULT_EDITOR_ASSOCIATION, EditorPaneSelectionChangeReason } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IDimDiagramViewOption, IDimDiagramViewService } from '../../../services/dimDiagram/common/dimDiagramView.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
+import { CustomEditorInput } from '../../customEditor/browser/customEditorInput.js';
+import { customEditorViewOptions } from '../../customEditor/common/customEditorView.js';
 
 /**
  * Command run by the Dim diagram viewer to switch the currently shown diagram.
@@ -157,10 +159,11 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	readonly onDidChangeViewOptions: Event<void> = this._onDidChangeViewOptions.event;
 
 	/**
-	 * The view last selected for a source file (a {@link DimDiagramType} or
-	 * {@link README_VIEW_ID}), so the picker can mark it active.
+	 * Follows the view the active diagram viewer shows, so the picker and the viewer
+	 * change together. The viewer's editor input holds that view (see
+	 * {@link CustomEditorInput.view}); it is the one record of which view is showing.
 	 */
-	private readonly _selectedBySource = new Map<string, string>();
+	private readonly _activeViewListener = this._register(new MutableDisposable());
 
 	/**
 	 * The diagrams a source file's record holds, keyed by source URI, so the breadcrumb
@@ -335,16 +338,27 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	 */
 	private _ref(editor: EditorInput | null | undefined): { readonly sourceUri: URI; readonly recordActive: boolean; readonly bigPicture: boolean } | undefined {
 		const sourceUri = editor?.resource;
-		if (!editor || !sourceUri || !this._contextService.getWorkspaceFolder(sourceUri)) {
-			return undefined;
-		}
-		// A big-picture record is opened directly: it is its own record, and its "source"
-		// for the toggle (Raw shows the record's JSON).
-		const bigPicture = isDimBigPictureRecord(this._contextService.getWorkspace().folders.map(folder => folder.uri), sourceUri);
-		if (!bigPicture && !isDimCodeFile(sourceUri)) {
+		const bigPicture = sourceUri && this._isBigPicture(sourceUri);
+		if (!editor || !sourceUri || bigPicture === undefined) {
 			return undefined;
 		}
 		return { sourceUri, recordActive: editor.editorId === DIM_EDITOR_VIEW_TYPE, bigPicture };
+	}
+
+	/**
+	 * Whether a file Dim shows in the diagram viewer is a big-picture record (which is
+	 * its own record, so Raw shows the record's JSON) rather than a code file with a
+	 * companion record. `undefined` for files the viewer does not show: other files, and
+	 * files outside the workspace.
+	 */
+	private _isBigPicture(uri: URI): boolean | undefined {
+		if (!this._contextService.getWorkspaceFolder(uri)) {
+			return undefined;
+		}
+		if (isDimBigPictureRecord(this._contextService.getWorkspace().folders.map(folder => folder.uri), uri)) {
+			return true;
+		}
+		return isDimCodeFile(uri) ? false : undefined;
 	}
 
 	/**
@@ -377,6 +391,18 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		const seq = ++this._updateSeq;
 		const activeEditor = this._editorService.activeEditor;
 		const ref = this._ref(activeEditor);
+
+		// Keep the viewer on the view its editor input names, and follow later changes.
+		const viewInput = ref ? this._dimInput(activeEditor) : undefined;
+		this._activeViewListener.value = viewInput?.onDidChangeSelection(() => this._syncViewer(viewInput));
+		if (viewInput) {
+			if (viewInput.view === undefined) {
+				// Name the default view, so navigation history records it and going back
+				// returns to it.
+				viewInput.setView(README_VIEW_ID, EditorPaneSelectionChangeReason.NAVIGATION);
+			}
+			this._syncViewer(viewInput);
+		}
 
 		// The diagram viewer is the default editor for every code file, but only files Dim
 		// supports (code files in the workspace, and big-picture records) have a record to
@@ -411,18 +437,46 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		this._onDidChangeViewOptions.fire();
 	}
 
+	/** The diagram viewer's editor input when the editor is one, else `undefined`. */
+	private _dimInput(editor: EditorInput | null | undefined): CustomEditorInput | undefined {
+		return editor instanceof CustomEditorInput && editor.viewType === DIM_EDITOR_VIEW_TYPE ? editor : undefined;
+	}
+
+	/**
+	 * The view a diagram viewer shows: the one its input names when the record has it,
+	 * otherwise the always-present README overview (which the viewer also falls back to).
+	 */
+	private _shownView(input: CustomEditorInput): string {
+		const view = input.view;
+		if (!view || view === README_VIEW_ID || !input.resource) {
+			return README_VIEW_ID;
+		}
+		const diagrams = this._diagramsBySource.get(input.resource.toString());
+		// Until the record has been read, trust the requested view: the viewer reads the
+		// record itself and falls back when the view is missing.
+		return !diagrams || diagrams.some(d => d.type === view) ? view : README_VIEW_ID;
+	}
+
+	/**
+	 * Brings the picker and the diagram viewer in line with the view the viewer's input
+	 * names. Dispatches synchronously, so rapid switches reach the viewer in order.
+	 */
+	private _syncViewer(input: CustomEditorInput): void {
+		this._onDidChangeViewOptions.fire();
+		if (input.resource) {
+			void this._commandService.executeCommand(SHOW_DIAGRAM_COMMAND, input.resource.toString(), input.view ?? README_VIEW_ID);
+		}
+	}
+
 	getViewOptions(editor: EditorInput): readonly IDimDiagramViewOption[] | undefined {
 		const ref = this._ref(editor);
 		if (!ref) {
 			return undefined;
 		}
-		const key = ref.sourceUri.toString();
-		const diagrams = this._diagramsBySource.get(key) ?? [];
-		// When the diagram viewer is showing, the default view mirrors the viewer's own:
-		// the always-present README overview, unless another view was selected earlier.
-		const current: string = ref.recordActive
-			? (this._selectedBySource.get(key) ?? README_VIEW_ID)
-			: 'raw';
+		const diagrams = this._diagramsBySource.get(ref.sourceUri.toString()) ?? [];
+		// The checked view is the one the diagram viewer shows, or Raw for the text editor.
+		const viewInput = ref.recordActive ? this._dimInput(editor) : undefined;
+		const current = viewInput ? this._shownView(viewInput) : ref.recordActive ? README_VIEW_ID : 'raw';
 		// Raw first (the editable source), then the README overview (always available),
 		// then one entry per diagram the record holds.
 		const options: IDimDiagramViewOption[] = [
@@ -460,20 +514,18 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	 * which a click in a diagram runs once it has resolved what was clicked.
 	 *
 	 * @param sourceUri The source file URI, with a focus fragment for one symbol.
-	 * @param viewId The view to open on (a {@link DimDiagramType}); the viewer's
-	 * default (the README overview) when omitted.
+	 * @param viewId The view to open on (a {@link DimDiagramType} or the README
+	 * overview); the README overview when omitted.
 	 */
 	private async _openDim(sourceUri: URI, viewId: string | undefined): Promise<void> {
-		if (!isDimCodeFile(sourceUri) || !this._contextService.getWorkspaceFolder(sourceUri)) {
-			return;
+		if (this._isBigPicture(sourceUri) === undefined) {
+			return; // not a file Dim has a record for
 		}
-		if (viewId) {
-			// Tell the viewer which view to show before it opens, as {@link _showView} does,
-			// so it resolves straight onto that view in its initial render.
-			this._selectedBySource.set(sourceUri.toString(), viewId);
-			await this._commandService.executeCommand(SHOW_DIAGRAM_COMMAND, sourceUri.toString(), viewId);
-		}
-		await this._editorService.openEditor({ resource: sourceUri, options: { override: DIM_EDITOR_VIEW_TYPE, pinned: true } });
+		const view = viewId ?? README_VIEW_ID;
+		// Tell the viewer which view to show before it opens, as {@link _showView} does,
+		// so it resolves straight onto that view in its initial render.
+		await this._commandService.executeCommand(SHOW_DIAGRAM_COMMAND, sourceUri.toString(), view);
+		await this._editorService.openEditor({ resource: sourceUri, options: { override: DIM_EDITOR_VIEW_TYPE, pinned: true, ...customEditorViewOptions(view) } });
 	}
 
 	/**
@@ -488,14 +540,13 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			return;
 		}
 		const sourceKey = ref.sourceUri.toString();
-		this._selectedBySource.set(sourceKey, viewId);
 
-		if (ref.recordActive) {
-			// The diagram viewer is already showing: switch in place. Refresh the picker's
-			// checked view and dispatch synchronously (no `await` before the command) so rapid
-			// clicks reach the viewer in click order and the last wins.
-			this._onDidChangeViewOptions.fire();
-			await this._commandService.executeCommand(SHOW_DIAGRAM_COMMAND, sourceKey, viewId);
+		const viewInput = this._dimInput(activeEditor);
+		if (viewInput) {
+			// The diagram viewer is already showing: switch in place. The input records the
+			// view (so going back returns to the previous one) and the change reaches the
+			// picker and the viewer synchronously, so rapid clicks apply in order.
+			viewInput.setView(viewId, EditorPaneSelectionChangeReason.NAVIGATION);
 			return;
 		}
 
@@ -505,7 +556,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		await this._commandService.executeCommand(SHOW_DIAGRAM_COMMAND, sourceKey, viewId);
 		await this._editorService.replaceEditors([{
 			editor: activeEditor,
-			replacement: { resource: ref.sourceUri, options: { override: DIM_EDITOR_VIEW_TYPE, pinned: true } }
+			replacement: { resource: ref.sourceUri, options: { override: DIM_EDITOR_VIEW_TYPE, pinned: true, ...customEditorViewOptions(viewId) } }
 		}], group);
 	}
 }

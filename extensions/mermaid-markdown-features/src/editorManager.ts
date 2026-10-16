@@ -489,7 +489,7 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				}
 			</style>
 		</head>
-		<body data-dim-clickable="${clickable}" data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
+		<body data-dim-clickable="${clickable}" data-dim-index="${index}" data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
 			${renderMermaidConfigSpan()}
 			${viewData}
 			<div class="zoom-controls"${initialIsReadme ? ' style="display: none;"' : ''}>

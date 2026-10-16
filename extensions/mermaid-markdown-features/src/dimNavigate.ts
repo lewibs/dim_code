@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
-import { DimLinkKind, IDimLink } from './dimRecord';
+import { DimLinkKind, DimLinkView, IDimLink } from './dimRecord';
 
 /**
  * What a click in a Dim diagram addresses. Mirrors `DimNavigateTarget` on the webview
@@ -54,14 +54,26 @@ interface IResolvedSymbol {
 	/** Its identifier, qualified by its owner for a member; empty for a whole file. */
 	readonly symbol: string;
 	readonly kind: DimLinkKind;
+	/** The view its link asks to open on (see {@link IDimLink.view}). */
+	readonly view?: DimLinkView;
+	/** The 1-based lines its link points at (see {@link IDimLink.line}). */
+	readonly line?: number;
+	readonly endLine?: number;
 }
 
-/** Where a click navigates: the Dim view to open, and the view to show in it. */
+/**
+ * Where a click navigates: the Dim view to open and the view to show in it, or, with
+ * a line, the file raw with those lines selected.
+ */
 export interface IDimDestination {
 	/** The source URI to open in the Dim viewer, with a focus fragment for one symbol. */
 	readonly uri: vscode.Uri;
-	/** The diagram type to show, or `undefined` for the viewer's default (README). */
+	/** The view to show (`raw` or a diagram type), or `undefined` for the README. */
 	readonly viewId?: string;
+	/** A 1-based line to select in the raw file; set only with `viewId: 'raw'`. */
+	readonly line?: number;
+	/** The last line to select, when the selection spans several. */
+	readonly endLine?: number;
 }
 
 /**
@@ -92,7 +104,10 @@ export async function resolveDimNavigation(source: vscode.Uri, shownLinks: reado
 		return undefined;
 	}
 	const destination = destinationFor(sourceFile, resolved);
-	return destination.uri.toString() === source.toString() ? undefined : destination;
+	// A link to the view already showing goes nowhere; one naming a view or a line of the
+	// same file still switches to it.
+	const sameView = destination.uri.toString() === source.toString() && destination.viewId === undefined;
+	return sameView ? undefined : destination;
 }
 
 /** Resolves what a click names: through the diagrams' links, else the symbol providers. */
@@ -107,15 +122,24 @@ async function resolveTarget(sourceFile: vscode.Uri, shownLinks: readonly IDimLi
 
 /** Applies the navigation rules of {@link resolveDimNavigation} to a resolved symbol. */
 function destinationFor(sourceFile: vscode.Uri, resolved: IResolvedSymbol): IDimDestination {
-	const { file, symbol, kind } = resolved;
+	const { file, symbol, kind, view, line, endLine } = resolved;
+	// A line is in the code itself, so the file opens raw with it selected.
+	if (line !== undefined) {
+		return { uri: file, viewId: 'raw', line, endLine };
+	}
+	if (view === 'raw') {
+		return { uri: file, viewId: 'raw' };
+	}
+	// A view the link names replaces the one its kind opens on; `readme` is the default.
+	const viewId = view === 'readme' ? undefined : view;
 	if (kind === 'file' || !focusSymbolPattern.test(symbol)) {
-		return { uri: file };
+		return { uri: file, viewId };
 	}
 	if (kind === 'attribute') {
-		return { uri: formatDimFocus(file, kind, symbol), viewId: 'stateDiagram' };
+		return { uri: formatDimFocus(file, kind, symbol), viewId: view ? viewId : 'stateDiagram' };
 	}
 	const sameFile = file.toString() === sourceFile.toString();
-	return sameFile ? { uri: formatDimFocus(file, kind, symbol) } : { uri: file };
+	return sameFile ? { uri: formatDimFocus(file, kind, symbol), viewId } : { uri: file, viewId };
 }
 
 /** An identifier, as the first capture of a match. */
@@ -217,12 +241,13 @@ async function resolveLink(sourceFile: vscode.Uri, link: IDimLink): Promise<IRes
 	if (link.file && folder) {
 		const file = vscode.Uri.joinPath(folder.uri, link.file);
 		if (await exists(file)) {
-			return { file, symbol: link.symbol, kind: link.kind };
+			return { file, symbol: link.symbol, kind: link.kind, view: link.view, line: link.line, endLine: link.endLine };
 		}
 	}
-	// No file, or the generator got the path wrong: search for the symbol instead.
+	// No file, or the generator got the path wrong: search for the symbol instead. Its
+	// line no longer applies (it was for the path the link named), but its view does.
 	const found = await resolveBySymbolProviders(sourceFile, unique([link.symbol, lastSegment(link.symbol)]));
-	return found && { ...found, kind: link.kind === 'file' ? 'file' : found.kind };
+	return found && { ...found, kind: link.kind === 'file' ? 'file' : found.kind, view: link.view };
 }
 
 /** Whether a file exists. */

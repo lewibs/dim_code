@@ -183,6 +183,11 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		disposables.push(webviewPanel.webview.onDidReceiveMessage((message: { type?: string; target?: IDimNavigateTarget }) => {
 			if (message?.type === 'dimNavigate' && message.target) {
 				void this._navigateFromDiagram(key, message.target);
+			} else if (message?.type === 'dimReady') {
+				// The page dropped anything posted before its script listened: re-send the
+				// view to show (the toggle may have switched it meanwhile) and the status.
+				webviewPanel.webview.postMessage({ type: 'dimSelectDiagram', index: view.index });
+				webviewPanel.webview.postMessage({ type: 'dimStatus', status: this._statusBanner(key, view) });
 			}
 		}));
 
@@ -290,8 +295,28 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			}
 			return;
 		}
+		if (destination.viewId === 'raw') {
+			await openRaw(destination.uri, destination.line, destination.endLine);
+			return;
+		}
 		await vscode.commands.executeCommand(openDimCommand, destination.uri.toString(), destination.viewId);
 	}
+}
+
+/**
+ * Opens a file in the text editor, with the given 1-based lines selected so they stand
+ * out (through the end of `endLine`, or just `line`).
+ */
+async function openRaw(file: vscode.Uri, line: number | undefined, endLine: number | undefined): Promise<void> {
+	if (line === undefined) {
+		await vscode.commands.executeCommand('vscode.openWith', file, 'default', { preview: false });
+		return;
+	}
+	const document = await vscode.workspace.openTextDocument(file);
+	const start = Math.min(line, document.lineCount) - 1;
+	const end = Math.max(start, Math.min(endLine ?? line, document.lineCount) - 1);
+	const selection = new vscode.Range(start, 0, end, document.lineAt(end).range.end.character);
+	await vscode.commands.executeCommand('vscode.openWith', file, 'default', { preview: false, selection });
 }
 
 /**

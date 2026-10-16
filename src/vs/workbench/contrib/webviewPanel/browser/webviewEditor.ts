@@ -16,7 +16,7 @@ import { IStorageService } from '../../../../platform/storage/common/storage.js'
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
-import { IEditorOpenContext, IEditorPaneSelection } from '../../../common/editor.js';
+import { IEditorOpenContext, IEditorPaneSelection, IEditorPaneSelectionChangeEvent } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IOverlayWebview } from '../../webview/browser/webview.js';
 import { WebviewWindowDragMonitor } from '../../webview/browser/webviewWindowDragMonitor.js';
@@ -78,6 +78,11 @@ export class WebviewEditor extends EditorPane {
 		return this.input instanceof WebviewInput ? this.input.getSelection() : undefined;
 	}
 
+	private readonly _onDidChangeSelection = this._register(new Emitter<IEditorPaneSelectionChangeEvent>());
+	/** Fires when the input's selection changes, so navigation history can record it. */
+	readonly onDidChangeSelection = this._onDidChangeSelection.event;
+	private readonly _inputSelectionListener = this._register(new MutableDisposable());
+
 	protected createEditor(parent: HTMLElement): void {
 		const element = document.createElement('div');
 		this._element = element;
@@ -133,6 +138,7 @@ export class WebviewEditor extends EditorPane {
 	}
 
 	public override clearInput() {
+		this._inputSelectionListener.clear();
 		if (this.webview) {
 			this.webview.release(this);
 			this._webviewVisibleDisposables.clear();
@@ -165,6 +171,7 @@ export class WebviewEditor extends EditorPane {
 			if (!alreadyOwnsWebview) {
 				this.claimWebview(input);
 			}
+			this._inputSelectionListener.value = input.onDidChangeSelection(e => this._onDidChangeSelection.fire(e));
 		}
 		await this.applyNavigationOptions(options, token);
 	}

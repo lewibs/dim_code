@@ -30,6 +30,19 @@ export type DimLinkKind = 'class' | 'function' | 'attribute' | 'file';
 const dimLinkKinds: readonly DimLinkKind[] = ['class', 'function', 'attribute', 'file'];
 
 /**
+ * A view of the Dim viewer a link can open on: `raw` (the file in the text editor), the
+ * `readme` overview, or one of the record's diagrams.
+ */
+export type DimLinkView = 'raw' | 'readme' | 'classDiagram' | 'sequenceDiagram' | 'flowchart' | 'stateDiagram' | 'erDiagram';
+
+const dimLinkViews: readonly DimLinkView[] = ['raw', 'readme', 'classDiagram', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'erDiagram'];
+
+/** A 1-based line number, or `undefined` when the value is not one. */
+function parseLine(raw: unknown): number | undefined {
+	return typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 ? raw : undefined;
+}
+
+/**
  * One entry of a diagram's `links` list, written by the generator: an element as the
  * diagram draws it (`label`) and the code it stands for. See "Making every element
  * clickable" in the `diagram-writing` skill.
@@ -42,6 +55,15 @@ export interface IDimLink {
 	readonly kind: DimLinkKind;
 	/** Workspace-relative path of the defining file, when known. */
 	readonly file?: string;
+	/** The view to open on, instead of the one the link's kind opens on. */
+	readonly view?: DimLinkView;
+	/**
+	 * A 1-based line in the defining file. A link with a line opens the file raw, with
+	 * that line (through {@link endLine}) selected.
+	 */
+	readonly line?: number;
+	/** The last line of the range starting at {@link line}; just that line when omitted. */
+	readonly endLine?: number;
 }
 
 /** Keeps the well-formed entries of a diagram's raw `links` value. */
@@ -52,11 +74,16 @@ function parseLinks(raw: unknown): IDimLink[] {
 	const links: IDimLink[] = [];
 	for (const entry of raw as Array<Partial<Record<keyof IDimLink, unknown>> | null>) {
 		if (entry && typeof entry.label === 'string' && typeof entry.symbol === 'string' && dimLinkKinds.includes(entry.kind as DimLinkKind)) {
+			const line = parseLine(entry.line);
+			const endLine = parseLine(entry.endLine);
 			links.push({
 				label: entry.label,
 				symbol: entry.symbol,
 				kind: entry.kind as DimLinkKind,
 				file: typeof entry.file === 'string' && entry.file.length > 0 ? entry.file : undefined,
+				view: dimLinkViews.includes(entry.view as DimLinkView) ? entry.view as DimLinkView : undefined,
+				line,
+				endLine: line !== undefined && endLine !== undefined && endLine >= line ? endLine : undefined,
 			});
 		}
 	}
