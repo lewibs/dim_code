@@ -5,17 +5,21 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
+import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { joinPath, relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
-import { localize } from '../../../../nls.js';
+import { localize, localize2 } from '../../../../nls.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
 import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimBigPictureRecord, isDimCodeFile, parseDimFocus, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { MenuId, MenuRegistry } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { Extensions as ConfigurationExtensions, ConfigurationScope, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
+import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { KeybindingsRegistry, KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
@@ -146,6 +150,43 @@ function readmeViewTitle(): string {
 	return localize('dim.view.readme', "README");
 }
 
+/** Set while the active editor is a file Dim can show (a code file in the workspace, or a big-picture record). */
+const DIM_VIEW_AVAILABLE = new RawContextKey<boolean>('dimViewAvailable', false, localize('dimViewAvailable', "Whether the active editor is a file Dim can show as an overview and diagrams."));
+
+/** The command ids that step to the next and the previous view in the view picker's list, wrapping around. */
+const NEXT_VIEW_COMMAND_ID = 'dim.view.next';
+const PREVIOUS_VIEW_COMMAND_ID = 'dim.view.previous';
+
+/** The view commands with their Command Palette titles, in the view picker's order. */
+const dimViewCommands = [
+	{ id: README_COMMAND_ID, title: localize2('dim.showReadme', "Show README") },
+	{ id: RAW_COMMAND_ID, title: localize2('dim.showRaw', "Show Raw") },
+	{ id: diagramCommandId(DimDiagramType.Class), title: localize2('dim.showStructure', "Show Structure") },
+	{ id: diagramCommandId(DimDiagramType.Sequence), title: localize2('dim.showBehavior', "Show Behavior") },
+	{ id: diagramCommandId(DimDiagramType.Flowchart), title: localize2('dim.showLogic', "Show Logic") },
+	{ id: diagramCommandId(DimDiagramType.StatefulParameter), title: localize2('dim.showStates', "Show States") },
+	{ id: diagramCommandId(DimDiagramType.Entity), title: localize2('dim.showData', "Show Data") },
+	{ id: NEXT_VIEW_COMMAND_ID, title: localize2('dim.showNextView', "Show Next View"), key: KeyCode.KeyN },
+	{ id: PREVIOUS_VIEW_COMMAND_ID, title: localize2('dim.showPreviousView', "Show Previous View") },
+];
+
+for (const { id, title, key } of dimViewCommands) {
+	if (key !== undefined) {
+		// Ctrl+Alt+N (Cmd+Alt+N on macOS) steps through the views. Going back has no default
+		// key: Ctrl+Alt+B already toggles the secondary side bar.
+		KeybindingsRegistry.registerKeybindingRule({
+			id,
+			weight: KeybindingWeight.WorkbenchContrib,
+			when: DIM_VIEW_AVAILABLE,
+			primary: KeyMod.CtrlCmd | KeyMod.Alt | key,
+		});
+	}
+	MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
+		command: { id, title, category: localize2('dimCategory', "Dim") },
+		when: DIM_VIEW_AVAILABLE,
+	});
+}
+
 /**
  * The Dim context resolved for an editor: its source file, the diagrams the file's
  * companion `.dim` record holds, and whether the diagram viewer (rather than the
@@ -200,6 +241,9 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	/** Each workspace folder's watch on its git HEAD, keyed by folder URI. */
 	private readonly _commitWatchers = this._register(new DisposableMap<string>());
 
+	/** {@link DIM_VIEW_AVAILABLE}, which turns the view shortcuts on for the active editor. */
+	private readonly _viewAvailable: IContextKey<boolean>;
+
 	constructor(
 		@IEditorService private readonly _editorService: IEditorService,
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
@@ -207,14 +251,18 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		@IWorkspaceContextService private readonly _contextService: IWorkspaceContextService,
 		@ICommandService private readonly _commandService: ICommandService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
+		@IContextKeyService contextKeyService: IContextKeyService,
 	) {
 		super();
+		this._viewAvailable = DIM_VIEW_AVAILABLE.bindTo(contextKeyService);
 
 		for (const type of dimDiagramTypeOrder) {
 			this._register(CommandsRegistry.registerCommand(diagramCommandId(type), () => this._showView(type)));
 		}
 		this._register(CommandsRegistry.registerCommand(README_COMMAND_ID, () => this._showView(README_VIEW_ID)));
 		this._register(CommandsRegistry.registerCommand(RAW_COMMAND_ID, () => this._showRaw()));
+		this._register(CommandsRegistry.registerCommand(NEXT_VIEW_COMMAND_ID, () => this._stepView(1)));
+		this._register(CommandsRegistry.registerCommand(PREVIOUS_VIEW_COMMAND_ID, () => this._stepView(-1)));
 
 		// The diagram viewer (in the extension host) asks us where a file's record lives;
 		// the hashing that maps a source file to its sidecar is platform-only, so it stays
@@ -450,6 +498,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		const seq = ++this._updateSeq;
 		const activeEditor = this._editorService.activeEditor;
 		const ref = this._ref(activeEditor);
+		this._viewAvailable.set(!!ref);
 
 		// Keep the viewer on the view its editor input names, and follow later changes.
 		const viewInput = ref ? this._dimInput(activeEditor) : undefined;
@@ -550,6 +599,21 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		return options;
 	}
 
+	/**
+	 * Switches the active editor to the next (`1`) or previous (`-1`) view the picker lists
+	 * for it, wrapping around at either end.
+	 */
+	private async _stepView(step: 1 | -1): Promise<void> {
+		const activeEditor = this._editorGroupsService.activeGroup.activeEditor;
+		const options = activeEditor ? this.getViewOptions(activeEditor) : undefined;
+		if (!options || options.length === 0) {
+			return;
+		}
+		const current = Math.max(0, options.findIndex(option => option.checked));
+		const next = options[(current + step + options.length) % options.length];
+		await this._commandService.executeCommand(next.commandId);
+	}
+
 	/** Switches the active editor slot back to the text editor, editable with full language support. */
 	private async _showRaw(): Promise<void> {
 		const group = this._editorGroupsService.activeGroup;
@@ -599,6 +663,10 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			return;
 		}
 		const sourceKey = ref.sourceUri.toString();
+		const diagrams = this._diagramsBySource.get(sourceKey);
+		if (viewId !== README_VIEW_ID && diagrams && !diagrams.some(d => d.type === viewId)) {
+			return; // the record has no such diagram (a shortcut for a view the picker does not list)
+		}
 
 		const viewInput = this._dimInput(activeEditor);
 		if (viewInput) {

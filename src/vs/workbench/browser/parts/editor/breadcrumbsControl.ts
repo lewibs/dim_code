@@ -35,6 +35,7 @@ import { fillInSymbolsDragData, LocalSelectionTransfer } from '../../../../platf
 import { FileKind, IFileService, IFileStat } from '../../../../platform/files/common/files.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { InstantiationService } from '../../../../platform/instantiation/common/instantiationService.js';
+import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { KeybindingsRegistry, KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { IListService, WorkbenchAsyncDataTree, WorkbenchDataTree, WorkbenchListFocusContextKey } from '../../../../platform/list/browser/listService.js';
@@ -306,6 +307,7 @@ export class BreadcrumbsControl {
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IHoverService private readonly _hoverService: IHoverService,
 		@IDimDiagramViewService private readonly _dimDiagramViewService: IDimDiagramViewService,
+		@IKeybindingService private readonly _keybindingService: IKeybindingService,
 		@IBreadcrumbsService breadcrumbsService: IBreadcrumbsService
 	) {
 		this.domNode = document.createElement('div');
@@ -638,7 +640,9 @@ export class BreadcrumbsControl {
 		}
 		this._contextMenuService.showContextMenu({
 			getAnchor: () => editorTypeNode,
-			getActions: () => actions
+			getActions: () => actions,
+			// Shows each Dim view's shortcut next to it.
+			getKeyBinding: action => this._keybindingService.lookupKeybinding(action.id)
 		});
 	}
 
