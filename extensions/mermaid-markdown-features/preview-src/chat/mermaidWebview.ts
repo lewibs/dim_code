@@ -5,6 +5,7 @@
 import mermaid from 'mermaid';
 import { buildMermaidConfig, createMermaidErrorElement, loadExtensionConfig, markVsCodeContextAsError } from '../shared';
 import { VsCodeMermaidThemeTracker } from '../shared/vsCodeTheme';
+import { DimNavigate, enhanceDiagramClickability } from './dimClickable';
 import { VsCodeApi } from './vscodeApi';
 
 interface PanZoomState {
@@ -364,6 +365,15 @@ export class PanZoomHandler {
 		return this.panModeEnabled;
 	}
 
+	/**
+	 * Whether the most recent pointer gesture was a drag (a pan) rather than a clean
+	 * click. Stays set until the next `mousedown`, so a click handler firing right after
+	 * a pan can tell the two apart and avoid treating the end of a pan as a click.
+	 */
+	public didJustDrag(): boolean {
+		return this.hasDragged;
+	}
+
 	private zoomAtPoint(factor: number, x: number, y: number): void {
 		const minAllowedScale = Math.min(this.minScale, this.fitScale, this.scale);
 		const newScale = Math.min(this.maxScale, Math.max(minAllowedScale, this.scale * factor));
@@ -492,6 +502,23 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	const panZoomHandler = new PanZoomHandler(wrapper, content, vscode, options);
 	panZoomHandler.initialize();
 
+	// In the Dim editor the diagram's boxes and member rows are clickable, each one a
+	// link into the source or a companion `.dim` view; the plain mermaid preview panel
+	// leaves this off. Every click posts a `dimNavigate` message the extension resolves
+	// to a concrete resource. A click is routed only when the pointer did not just pan.
+	const clickable = document.body.dataset.dimClickable === 'true';
+	const navigate: DimNavigate = target => vscode.postMessage({ type: 'dimNavigate', target });
+	const enhanceClickability = (): void => {
+		if (clickable) {
+			enhanceDiagramClickability(diagram, navigate, () => panZoomHandler.didJustDrag());
+		}
+	};
+
+	// Wire up the initial diagram (the README view has no diagram to enhance).
+	if (!startsOnReadme) {
+		enhanceClickability();
+	}
+
 	if (startsOnReadme) {
 		wrapper.style.display = 'none';
 	}
@@ -510,6 +537,10 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 				return; // a newer request superseded this one
 			}
 			await rerenderMermaidDiagram(diagram, source, themeTracker);
+			if (latestSource === source) {
+				// mermaid replaced the SVG, so re-attach the click targets to the new one.
+				enhanceClickability();
+			}
 		}).catch(() => { /* keep the chain alive so later renders still run */ });
 		return renderChain;
 	};

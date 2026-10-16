@@ -234,8 +234,10 @@ class MermaidPreview extends Disposable {
  * @param views The views held by the record (README overview and/or diagrams).
  * @param diagramId The id used to address this webview for pan/zoom commands.
  * @param initialIndex The index of the view to show first (clamped to range).
+ * @param clickable Whether diagram boxes and member rows should act as links (the Dim
+ * editor turns this on; the plain preview panel leaves it off).
  */
-export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, views: readonly IDimWebviewView[], diagramId: string, initialIndex: number = 0): string {
+export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, views: readonly IDimWebviewView[], diagramId: string, initialIndex: number = 0, clickable: boolean = false): string {
 	const nonce = generateUuid();
 
 	const mediaRoot = vscode.Uri.joinPath(extensionUri, 'chat-webview-out');
@@ -333,9 +335,19 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 					background: var(--vscode-toolbar-activeBackground);
 					color: var(--vscode-focusBorder);
 				}
+				/* Clickable diagram boxes and member rows (Dim editor only). */
+				.dim-clickable {
+					cursor: pointer;
+				}
+				.dim-clickable-node:hover {
+					filter: brightness(1.12);
+				}
+				.dim-clickable-member:hover {
+					text-decoration: underline;
+				}
 			</style>
 		</head>
-		<body data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
+		<body data-dim-clickable="${clickable}" data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
 			${renderMermaidConfigSpan()}
 			${viewData}
 			<div class="zoom-controls"${initialIsReadme ? ' style="display: none;"' : ''}>

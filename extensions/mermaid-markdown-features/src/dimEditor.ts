@@ -34,6 +34,28 @@ const showDiagramCommand = '_dim.showDiagram';
  */
 const resolveRecordCommand = '_dim.resolveRecord';
 
+/**
+ * Workbench command a diagram click is forwarded to. It receives the clicked source
+ * file URI (as a string) and the {@link IDimNavigateTarget} describing what was clicked,
+ * and is responsible for opening the right resource — the source file for a box, or a
+ * companion `.dim` view for a member. NOTE: this command is the seam for that
+ * navigation logic, which is not implemented yet; until it is, a click is a no-op.
+ */
+const navigateFromDiagramCommand = '_dim.navigateFromDiagram';
+
+/**
+ * What a click in a Dim diagram addresses. Mirrors `DimNavigateTarget` on the webview
+ * side (`preview-src/chat/dimClickable.ts`); it is the *shape* of the request, not a
+ * resolved resource — the workbench decides which file or `.dim` view it maps to.
+ */
+interface IDimNavigateTarget {
+	readonly kind: 'node' | 'member';
+	readonly node: string;
+	readonly member?: string;
+	readonly memberKind?: 'attribute' | 'method';
+	readonly diagramType?: string;
+}
+
 /** One switchable view in the editor: the README overview (`text`) or a diagram (`mermaid`). */
 interface IDimViewEntry {
 	readonly type: string;
@@ -116,7 +138,7 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 				const selectedIndex = selectedType ? view.views.findIndex(v => v.type === selectedType) : -1;
 				const defaultIndex = view.views.length > 1 ? 1 : 0;
 				view.index = selectedIndex >= 0 ? selectedIndex : defaultIndex;
-				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index);
+				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index, /*clickable*/ true);
 			}
 		};
 		this._views.set(key, view);
@@ -125,6 +147,14 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		// record is a JSON container, so expose the first diagram's mermaid source.
 		const disposables: vscode.Disposable[] = [];
 		disposables.push(this._webviewManager.registerWebview(diagramId, webviewPanel.webview, '', document.uri.fsPath, 'editor'));
+
+		// A click on a diagram box or member row posts a `dimNavigate` message; forward it
+		// to the workbench, which resolves it to a source file or companion `.dim` view.
+		disposables.push(webviewPanel.webview.onDidReceiveMessage((message: { type?: string; target?: IDimNavigateTarget }) => {
+			if (message?.type === 'dimNavigate' && message.target) {
+				void this._navigateFromDiagram(key, message.target);
+			}
+		}));
 
 		// Watch the record so agent-driven updates re-render the diagram live.
 		if (recordUri) {
@@ -170,6 +200,25 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			const index = view.views.findIndex(v => v.type === type);
 			view.index = index >= 0 ? index : 0;
 			view.panel.webview.postMessage({ type: 'dimSelectDiagram', index: view.index });
+		}
+	}
+
+	/**
+	 * Forwards a diagram click to the workbench's navigation command, which maps the
+	 * clicked box or member to a source file or companion `.dim` view and opens it.
+	 *
+	 * The mapping itself lives behind {@link navigateFromDiagramCommand} and is not yet
+	 * implemented; the command may therefore be unregistered, so a missing command is
+	 * swallowed and the click simply does nothing until the logic is added.
+	 *
+	 * @param sourceUri The clicked file's source URI, as a string.
+	 * @param target What was clicked (a box or a member row).
+	 */
+	private async _navigateFromDiagram(sourceUri: string, target: IDimNavigateTarget): Promise<void> {
+		try {
+			await vscode.commands.executeCommand(navigateFromDiagramCommand, sourceUri, target);
+		} catch {
+			// The resolution command is not registered yet; navigation is a no-op until it is.
 		}
 	}
 }

@@ -63,7 +63,7 @@ function dimViewTitle(type: DimDiagramType): string {
 		case DimDiagramType.Class: return localize('dim.view.structure', "Structure");
 		case DimDiagramType.Sequence: return localize('dim.view.behavior', "Behavior");
 		case DimDiagramType.Flowchart: return localize('dim.view.logic', "Logic");
-		case DimDiagramType.State: return localize('dim.view.states', "States");
+		case DimDiagramType.StatefulParameter: return localize('dim.view.states', "States");
 		case DimDiagramType.Entity: return localize('dim.view.data', "Data");
 	}
 }

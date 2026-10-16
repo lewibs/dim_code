@@ -137,22 +137,48 @@ fi
 # "diagrams" array, which we wrap into the record below.
 code=$(head -c 60000 "$SRC")
 
-# The diagram catalog — which kinds exist and when to use each — is the single source
-# of truth, read here at runtime. It sits next to this script (and is copied beside it
-# into the materialized CLI-terminal plugin). The DimDiagramType enum in
-# dimDiagramTypes.ts mirrors its keywords for TypeScript, guarded by a drift test. We
-# build both the prompt's catalog block and the allowed-label list from it, so there is
-# nothing to keep in sync by hand.
-catalogFile="$(dirname "$0")/dimDiagramCatalog.md"
-catalogLines=""
+# The diagram-writing skill is the single source of truth, read here at runtime. Its
+# SKILL.md holds the general method AND a markdown table of the kinds (keyword + label +
+# per-kind skill file); each kind's detailed drawing instructions live in its own file
+# next to SKILL.md. We inject the general method (with its table) plus the skill for each
+# kind so Haiku follows the right instructions for the view it picks, and we build the
+# allowed-label list from the same table. The DimDiagramType enum in dimDiagramTypes.ts
+# mirrors the table's keywords for TypeScript, guarded by a drift test, so there is
+# nothing to keep in sync by hand. The skill dir sits in a fixed spot relative to the
+# source tree, but the generator is copied into the CLI-terminal plugin's hooks/ folder
+# while the skills are copied into its skills/ folder, so resolve whichever of the two
+# known layouts exists.
+skillsDir=""
+for cand in \
+	"$(dirname "$0")/../skills/diagram-writing" \
+	"$(dirname "$0")/../../../../../sessions/skills/diagram-writing"; do
+	if [ -d "$cand" ]; then
+		skillsDir="$cand"
+		break
+	fi
+done
+skillFile="$skillsDir/SKILL.md"
+
+# The general diagram-writing method (with the kinds table), from SKILL.md's body —
+# everything after its YAML front matter, i.e. after the second "---" line.
+skillGeneral=""
+if [ -n "$skillsDir" ] && [ -f "$skillFile" ]; then
+	skillGeneral=$(awk 'BEGIN{fm=0} /^---[[:space:]]*$/{fm++; next} fm>=2{print}' "$skillFile")
+fi
+if [ -z "$skillGeneral" ]; then
+	# Degraded fallback when the skill files are missing (e.g. a stale plugin install):
+	# describe the kinds inline so the model can still pick a sensible view.
+	skillGeneral="Choose from these kinds (mermaid keyword = label): classDiagram = Structure, sequenceDiagram = Behavior, flowchart = Logic, stateDiagram = States, erDiagram = Data. Pick only the views that earn their place: one is usually right, a second only when it shows something the first cannot. Do NOT pad with a diagram that merely restates the overview. When the file is standalone functions + interfaces, prefer a Structure view of the whole module (its interfaces + functions with call edges), not a flowchart of one function. Base every diagram on THIS code using its real identifiers, and populate referenced types from the imported definitions instead of leaving empty boxes."
+fi
+
+# Parse the kinds table in SKILL.md for the allowed-label list and to pull in each kind's
+# own skill file. A table row starts with "|", so its leading cell (before the first "|")
+# is empty; skip prose (non-empty leading cell), the --- divider, and the header row.
 catalogLabels=""
-if [ -f "$catalogFile" ]; then
+skillSections=""
+if [ -n "$skillsDir" ] && [ -f "$skillFile" ]; then
 	headerDone=0
-	# The catalog is a markdown table "| entity | diagram | keyword | label |" embedded in
-	# a markdown doc. Parse ONLY the table rows and ignore the surrounding prose: a table
-	# row starts with "|", so its leading cell (before the first "|") is empty. Skip prose
-	# (non-empty leading cell), the --- divider, and the first table row (the header).
-	while IFS='|' read -r _lead entity diagram keyword label _rest; do
+	while IFS='|' read -r _lead entity diagram keyword label skill _rest; do
 		# Not a table row (prose/blank): the text before the first "|" is non-empty.
 		if [ -n "$(printf '%s' "$_lead" | tr -d ' \t')" ]; then
 			continue
@@ -170,33 +196,36 @@ if [ -f "$catalogFile" ]; then
 			headerDone=1
 			continue
 		fi
-		entity=$(printf '%s' "$entity" | sed 's/^[ \t]*//;s/[ \t]*$//')
-		diagram=$(printf '%s' "$diagram" | sed 's/^[ \t]*//;s/[ \t]*$//')
 		keyword=$(printf '%s' "$keyword" | sed 's/^[ \t]*//;s/[ \t]*$//')
 		label=$(printf '%s' "$label" | sed 's/^[ \t]*//;s/[ \t]*$//')
-		catalogLines="${catalogLines}- ${keyword} = ${label} = ${entity} → ${diagram}
-"
+		skill=$(printf '%s' "$skill" | sed 's/^[ \t]*//;s/[ \t]*$//')
 		catalogLabels="${catalogLabels}${label}, "
-	done < "$catalogFile"
+		# Pull in this kind's skill so the prompt carries how to draw it, headed so the
+		# model can match the table row to the instructions for the kind it chooses.
+		if [ -n "$skill" ] && [ -f "$skillsDir/$skill" ]; then
+			skillSections="${skillSections}
+=== Skill for ${label} (${keyword}) ===
+$(cat "$skillsDir/$skill")
+"
+		fi
+	done < "$skillFile"
 	catalogLabels=$(printf '%s' "$catalogLabels" | sed 's/, $//')
 fi
-if [ -z "$catalogLines" ]; then
-	# Degraded fallback when the catalog file is missing (e.g. a stale plugin install):
-	# let the model pick any standard diagram rather than failing outright.
-	catalogLines="- use whichever standard Mermaid diagram (classDiagram, sequenceDiagram, flowchart, stateDiagram, erDiagram) best fits the code"
+if [ -z "$catalogLabels" ]; then
+	# Degraded fallback when the skill files are missing (e.g. a stale plugin install).
 	catalogLabels="a short title for the view"
 fi
 
 prompt=$(cat <<PROMPT_HEADER
-You document source files shown inside an IDE. For the code below, do two things: (1) write a plain-English description of what the file is for and the role/intent of its main class, functions or module, and (2) draw the Mermaid diagram(s) that genuinely help someone understand THIS code. Pick only the views that earn their place: one is usually right, a second only when it shows something the first cannot. Do NOT pad with a diagram that merely restates the overview or lists the file's parts; every diagram must reveal real structure or behavior from the code. Order them most-useful first.
+You document source files shown inside an IDE. For the code below, do two things: (1) write a plain-English description of what the file is for and the role/intent of its main class, functions or module, and (2) draw the Mermaid diagram(s) that genuinely help someone understand THIS code.
 
-Diagram catalog (mermaid keyword = label = when to use):
-${catalogLines}
-Rules:
-- When the file holds several functions (a module with no single central class), do NOT just flowchart one of them. First decide the file's shape, then prefer a Structure view of the whole module (its interfaces plus its functions and their call relationships); add a Logic flowchart only for an individual function whose branching is genuinely the point.
+Method (includes the catalog of kinds you may choose from):
+${skillGeneral}
+
+For the kind(s) you choose, follow that kind's skill below (match the catalog label to its skill heading):
+${skillSections}
+Output rules:
 - "readme" is a plain-text description (no markdown) of THIS file: what it is for, the role/intent of its main class, functions or module, the responsibility it owns and the problem it solves (not just a restatement of its name). Keep it to a few sentences.
-- Base the diagram on what THIS code actually contains; use real identifiers from it.
-- When a type this file references is defined in the imported definitions provided below, populate it with its real members; never leave a referenced type as an empty box.
 - "label" MUST be exactly one of: ${catalogLabels} (matching the type you chose).
 - "mermaid" MUST be valid Mermaid source beginning with the diagram's keyword.
 - "diagrams" holds only the views that genuinely help (often just one), each a distinct type; never add a type just to have more.

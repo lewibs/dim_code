@@ -16,8 +16,8 @@ export const enum DimDiagramType {
 	Sequence = 'sequenceDiagram',
 	/** Flowchart — control flow within a routine, or a high-level component graph. */
 	Flowchart = 'flowchart',
-	/** State diagram — a state machine's modes and transitions. */
-	State = 'stateDiagram',
+	/** State diagram — a class's stateful parameter: a field/property whose value moves through a fixed set of modes. */
+	StatefulParameter = 'stateDiagram',
 	/** Entity-relationship diagram — a relational / SQL-shaped data model. */
 	Entity = 'erDiagram',
 }
@@ -25,16 +25,16 @@ export const enum DimDiagramType {
 /**
  * Every diagram kind, in the canonical order the `.dim` viewer lists them. A plain
  * array because {@link DimDiagramType} is a `const enum` and so has no runtime
- * `Object.values`. Which kinds exist and when to use each is owned by the catalog
- * data file `node/claude/dimWorkflow/dimDiagramCatalog.md` that the generator reads;
- * this array mirrors its keywords for TypeScript, and a drift test keeps the two
- * identical, so a kind can never be added to one without the other.
+ * `Object.values`. Which kinds exist and when to use each is owned by the kinds table
+ * in the diagram-writing skill `sessions/skills/diagram-writing/SKILL.md` that the
+ * generator reads; this array mirrors its keywords for TypeScript, and a drift test
+ * keeps the two identical, so a kind can never be added to one without the other.
  */
 export const dimDiagramTypes: readonly DimDiagramType[] = [
 	DimDiagramType.Class,
 	DimDiagramType.Sequence,
 	DimDiagramType.Flowchart,
-	DimDiagramType.State,
+	DimDiagramType.StatefulParameter,
 	DimDiagramType.Entity,
 ];
 
@@ -55,15 +55,15 @@ export function inferDimDiagramType(mermaid: string): DimDiagramType {
 	const head = mermaid.trimStart().toLowerCase();
 	if (head.startsWith('classdiagram')) { return DimDiagramType.Class; }
 	if (head.startsWith('sequencediagram')) { return DimDiagramType.Sequence; }
-	if (head.startsWith('statediagram')) { return DimDiagramType.State; }
+	if (head.startsWith('statediagram')) { return DimDiagramType.StatefulParameter; }
 	if (head.startsWith('erdiagram')) { return DimDiagramType.Entity; }
 	return DimDiagramType.Flowchart;
 }
 
 /**
  * The short, title-cased label stored for a diagram of the given `type`. This is the
- * record's own fallback label (the generator already writes a `label` from the catalog
- * data file); keep the strings in step with the labels in `dimDiagramCatalog.md`. The
+ * record's own fallback label (the generator already writes a `label` from the kinds
+ * table); keep the strings in step with the labels in the diagram-writing `SKILL.md`. The
  * `.dim` viewer's toggle uses its own localized labels, so these are plain English
  * record data, not UI strings. Unknown/legacy types fall back to
  * {@link dimDiagramFallbackLabel}.
@@ -75,7 +75,7 @@ export function dimDiagramLabel(type: string): string {
 		case DimDiagramType.Class: return "Structure";
 		case DimDiagramType.Sequence: return "Behavior";
 		case DimDiagramType.Flowchart: return "Logic";
-		case DimDiagramType.State: return "States";
+		case DimDiagramType.StatefulParameter: return "States";
 		case DimDiagramType.Entity: return "Data";
 		default: return dimDiagramFallbackLabel;
 	}

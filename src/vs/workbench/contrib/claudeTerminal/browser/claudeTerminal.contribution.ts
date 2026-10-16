@@ -185,20 +185,27 @@ class ClaudeTerminalViewPane extends ViewPane {
 			await this._fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
 			await this._fileService.writeFile(joinPath(hooksDir, 'hooks.json'), VSBuffer.fromString(JSON.stringify(hooks, null, '\t')));
 
-			// Copy the bundled hook script, its per-file diagram generator, the diagram
-			// catalog that generator reads, and the skill straight from the build output so
-			// the plugin and Dim's native sessions share a single source of truth.
-			// updateDimHook.sh resolves the generator relative to itself, and the generator
-			// resolves the catalog relative to itself, so all three must land in the same
-			// hooks folder.
+			// Copy the bundled hook script and its per-file diagram generator straight from
+			// the build output so the plugin and Dim's native sessions share a single source
+			// of truth. updateDimHook.sh resolves the generator relative to itself, so both
+			// must land in the same hooks folder.
 			const hookSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/updateDimHook.sh');
 			const generatorSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/generateDimDiagram.sh');
-			const catalogSource = FileAccess.asFileUri('vs/platform/agentHost/node/claude/dimWorkflow/dimDiagramCatalog.md');
-			const skillSource = FileAccess.asFileUri('vs/sessions/skills/diagram-writing/SKILL.md');
 			await this._fileService.writeFile(joinPath(hooksDir, 'updateDimHook.sh'), (await this._fileService.readFile(hookSource)).value);
 			await this._fileService.writeFile(joinPath(hooksDir, 'generateDimDiagram.sh'), (await this._fileService.readFile(generatorSource)).value);
-			await this._fileService.writeFile(joinPath(hooksDir, 'dimDiagramCatalog.md'), (await this._fileService.readFile(catalogSource)).value);
-			await this._fileService.writeFile(joinPath(skillDir, 'SKILL.md'), (await this._fileService.readFile(skillSource)).value);
+
+			// Copy the whole diagram-writing skill — the general SKILL.md (which holds the
+			// method and the catalog of kinds the generator reads) plus every per-kind diagram
+			// skill (one markdown file per kind). The generator resolves these from
+			// `../skills/diagram-writing/` relative to its hooks folder and injects the matching
+			// kind's instructions into its prompt.
+			const skillSourceDir = FileAccess.asFileUri('vs/sessions/skills/diagram-writing');
+			const skillEntries = await this._fileService.resolve(skillSourceDir);
+			for (const child of skillEntries.children ?? []) {
+				if (!child.isDirectory && child.name.endsWith('.md')) {
+					await this._fileService.writeFile(joinPath(skillDir, child.name), (await this._fileService.readFile(child.resource)).value);
+				}
+			}
 
 			return root;
 		} catch (err) {
