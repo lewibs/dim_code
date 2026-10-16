@@ -424,7 +424,7 @@ async function rerenderMermaidDiagram(
  * switches between these by index via a `dimSelectDiagram` message. Returns an empty
  * array when the block is absent or malformed.
  */
-function readDimViews(): Array<{ mermaid?: string; text?: string }> {
+function readDimViews(): Array<{ mermaid?: string; text?: string; placeholder?: boolean }> {
 	const dataElement = document.getElementById('dim-views');
 	if (!dataElement) {
 		return [];
@@ -437,7 +437,121 @@ function readDimViews(): Array<{ mermaid?: string; text?: string }> {
 	}
 }
 
+/**
+ * The README view's generation status banner. Mirrors `IDimStatusBanner` in the
+ * extension's `editorManager.ts`; keep the two in sync.
+ */
+interface DimStatusBanner {
+	readonly kind: 'running' | 'failed';
+	readonly message: string;
+	readonly detail?: string;
+	readonly steps?: ReadonlyArray<{ readonly label: string; readonly state: DimStepState }>;
+	readonly startedAt?: number;
+	readonly elapsedLabel?: string;
+}
+
+type DimStepState = 'done' | 'current' | 'pending';
+
+/** Codicon classes for each banner kind; mirrors the icon the extension renders initially. */
+const dimStatusIconClasses: Record<DimStatusBanner['kind'], readonly string[]> = {
+	running: ['codicon-loading', 'codicon-modifier-spin'],
+	failed: ['codicon-error'],
+};
+
+/**
+ * Codicon classes for a step's state. Mirrors `dimStepIconClasses` in the extension's
+ * `editorManager.ts`; keep the two in sync.
+ */
+const dimStepIconClasses: Record<DimStepState, readonly string[]> = {
+	done: ['codicon-check'],
+	current: ['codicon-loading', 'codicon-modifier-spin'],
+	pending: ['codicon-circle-large-outline'],
+};
+
+/**
+ * Refreshes the banner's elapsed-time text from its `data-started-at` and
+ * `data-elapsed-label` attributes; clears it when the banner has no running timer.
+ */
+function updateDimStatusElapsed(): void {
+	const banner = document.querySelector<HTMLElement>('.dim-status');
+	const elapsed = banner?.querySelector<HTMLElement>('.dim-status-elapsed');
+	if (!banner || !elapsed) {
+		return;
+	}
+	const startedAt = Number(banner.dataset.startedAt);
+	const label = banner.dataset.elapsedLabel;
+	elapsed.textContent = !banner.hidden && label && Number.isFinite(startedAt)
+		? label.replace('{0}', String(Math.max(0, Math.floor((Date.now() - startedAt) / 1000))))
+		: '';
+}
+
+/**
+ * Shows (or, with `undefined`, hides) the README's generation status banner in place.
+ * The banner exists in the page whether or not the README is the shown view, so an
+ * update while a diagram shows is visible as soon as the README is selected.
+ */
+function applyDimStatus(status: DimStatusBanner | undefined): void {
+	const banner = document.querySelector<HTMLElement>('.dim-status');
+	if (!banner) {
+		return;
+	}
+	banner.hidden = !status;
+	if (status?.startedAt !== undefined && status.elapsedLabel) {
+		banner.dataset.startedAt = String(status.startedAt);
+		banner.dataset.elapsedLabel = status.elapsedLabel;
+	} else {
+		delete banner.dataset.startedAt;
+		delete banner.dataset.elapsedLabel;
+	}
+	updateDimStatusElapsed();
+	if (!status) {
+		return;
+	}
+	banner.dataset.kind = status.kind;
+	const steps = banner.querySelector<HTMLElement>('.dim-status-steps');
+	if (steps) {
+		steps.replaceChildren(...(status.steps ?? []).map(step => {
+			const item = document.createElement('li');
+			item.dataset.state = step.state;
+			const stepIcon = document.createElement('i');
+			stepIcon.className = 'codicon';
+			stepIcon.classList.add(...dimStepIconClasses[step.state]);
+			stepIcon.setAttribute('aria-hidden', 'true');
+			const text = document.createElement('span');
+			text.textContent = step.label;
+			item.append(stepIcon, text);
+			return item;
+		}));
+	}
+	const icon = banner.querySelector<HTMLElement>('.codicon');
+	if (icon) {
+		icon.classList.remove(...dimStatusIconClasses.running, ...dimStatusIconClasses.failed);
+		icon.classList.add(...dimStatusIconClasses[status.kind]);
+	}
+	const message = banner.querySelector<HTMLElement>('.dim-status-message');
+	if (message) {
+		message.textContent = status.message;
+	}
+	const detail = banner.querySelector<HTMLElement>('.dim-status-detail');
+	if (detail) {
+		detail.textContent = status.detail ?? '';
+	}
+}
+
 export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZoomOptions): Promise<PanZoomHandler | undefined> {
+	// Generation progress can change at any moment, including while the first diagram
+	// renders below, so listen for it before anything is awaited.
+	window.addEventListener('message', event => {
+		if (event.data?.type === 'dimStatus') {
+			applyDimStatus(event.data.status);
+		}
+	});
+	// Tick the running banner's elapsed time while Claude works. The webview is torn
+	// down with the page, which ends the timer.
+	if (document.querySelector('.dim-status')) {
+		setInterval(updateDimStatusElapsed, 1000);
+	}
+
 	const diagram = document.querySelector<HTMLElement>('.mermaid');
 	if (!diagram) {
 		return;
@@ -477,6 +591,11 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	diagram.parentNode?.insertBefore(wrapper, diagram);
 	content.appendChild(diagram);
 	wrapper.appendChild(content);
+	// Hide the diagram surface right away when the README shows first, so nothing in
+	// the setup below can leave it covering the README.
+	if (startsOnReadme) {
+		wrapper.style.display = 'none';
+	}
 
 	mermaid.initialize(buildMermaidConfig(loadExtensionConfig(), themeTracker));
 
@@ -519,10 +638,6 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 		enhanceClickability();
 	}
 
-	if (startsOnReadme) {
-		wrapper.style.display = 'none';
-	}
-
 	// Serialize re-renders. `mermaid.run` mutates the diagram node in place and is
 	// not safe to run concurrently, so overlapping requests — rapid toggle clicks,
 	// or a theme change landing mid-switch — would race and leave the wrong diagram
@@ -561,8 +676,13 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 			}
 			if (typeof selected.text === 'string') {
 				// Show the README overview and hide the diagram surface and its controls.
+				// Only the text is swapped; the status banner above it stays as it is.
 				if (readmeEl) {
-					readmeEl.textContent = selected.text;
+					const textEl = readmeEl.querySelector<HTMLElement>('.dim-readme-text');
+					if (textEl) {
+						textEl.textContent = selected.text;
+						textEl.classList.toggle('dim-readme-placeholder', !!selected.placeholder);
+					}
 					readmeEl.style.display = '';
 				}
 				wrapper.style.display = 'none';

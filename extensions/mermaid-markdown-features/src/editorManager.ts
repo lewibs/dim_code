@@ -21,7 +21,42 @@ export interface IDimWebviewView {
 	readonly label: string;
 	readonly mermaid?: string;
 	readonly text?: string;
+	/** Set when `text` is a stand-in because the file has no overview yet. */
+	readonly placeholder?: boolean;
 }
+
+/**
+ * A banner shown at the top of the README view while the file's diagrams are being
+ * generated, or after generation failed. Mirrors `DimStatusBanner` on the webview side
+ * (`preview-src/chat/mermaidWebview.ts`); keep the two in sync.
+ */
+export interface IDimStatusBanner {
+	readonly kind: 'running' | 'failed';
+	readonly message: string;
+	readonly detail?: string;
+	/** The steps of a running generation, in order, each marked done, current or pending. */
+	readonly steps?: readonly IDimStatusStep[];
+	/** When the running generation started (epoch ms), for the live elapsed-time counter. */
+	readonly startedAt?: number;
+	/** The elapsed-time text, with `{0}` standing for the whole seconds elapsed. */
+	readonly elapsedLabel?: string;
+}
+
+/** One step of a running generation, as listed in the status banner. */
+export interface IDimStatusStep {
+	readonly label: string;
+	readonly state: 'done' | 'current' | 'pending';
+}
+
+/**
+ * Codicon classes for a step's state. Mirrors `dimStepIconClasses` on the webview side
+ * (`preview-src/chat/mermaidWebview.ts`); keep the two in sync.
+ */
+const dimStepIconClasses: Record<IDimStatusStep['state'], string> = {
+	done: 'codicon-check',
+	current: 'codicon-loading codicon-modifier-spin',
+	pending: 'codicon-circle-large-outline',
+};
 
 interface MermaidPreviewState {
 	readonly webviewId: string;
@@ -236,8 +271,10 @@ class MermaidPreview extends Disposable {
  * @param initialIndex The index of the view to show first (clamped to range).
  * @param clickable Whether diagram boxes and member rows should act as links (the Dim
  * editor turns this on; the plain preview panel leaves it off).
+ * @param status The generation progress or failure to show atop the README view, if any.
+ * Later changes arrive as `dimStatus` messages.
  */
-export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, views: readonly IDimWebviewView[], diagramId: string, initialIndex: number = 0, clickable: boolean = false): string {
+export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, views: readonly IDimWebviewView[], diagramId: string, initialIndex: number = 0, clickable: boolean = false, status?: IDimStatusBanner): string {
 	const nonce = generateUuid();
 
 	const mediaRoot = vscode.Uri.joinPath(extensionUri, 'chat-webview-out');
@@ -255,13 +292,36 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 	const initialIsReadme = initial?.text !== undefined;
 	const mermaidSource = initialIsReadme ? '' : (initial?.mermaid ?? '');
 	const readmeText = initialIsReadme ? (initial?.text ?? '') : '';
+	const readmePlaceholder = initialIsReadme && !!initial?.placeholder;
 
 	// All views, embedded as JSON data so the native toggle can swap the shown view
 	// in place. `type="application/json"` is a data block (not executed), and
 	// `<`/`>`/`&` are escaped so the payload cannot break out of the script element.
 	const viewData = views.length > 0
-		? `<script type="application/json" id="dim-views" nonce="${nonce}">${JSON.stringify(views.map(v => ({ label: v.label, mermaid: v.mermaid, text: v.text }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
+		? `<script type="application/json" id="dim-views" nonce="${nonce}">${JSON.stringify(views.map(v => ({ label: v.label, mermaid: v.mermaid, text: v.text, placeholder: v.placeholder }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
 		: '';
+
+	// The status banner is always in the README so `dimStatus` messages can fill it in;
+	// it starts hidden when there is nothing to report. The icon classes mirror
+	// `dimStatusIconClasses` on the webview side.
+	const statusIcon = status?.kind === 'failed' ? 'codicon-error' : 'codicon-loading codicon-modifier-spin';
+	const statusSteps = (status?.steps ?? []).map(step =>
+		`<li data-state="${step.state}"><i class="codicon ${dimStepIconClasses[step.state]}" aria-hidden="true"></i><span>${escapeHtmlText(step.label)}</span></li>`).join('');
+	const statusElapsed = status?.startedAt !== undefined && status.elapsedLabel
+		? status.elapsedLabel.replace('{0}', String(Math.max(0, Math.floor((Date.now() - status.startedAt) / 1000))))
+		: '';
+	const statusTiming = status?.startedAt !== undefined && status.elapsedLabel
+		? ` data-started-at="${status.startedAt}" data-elapsed-label="${escapeHtmlText(status.elapsedLabel)}"`
+		: '';
+	const statusBanner = `<div class="dim-status" role="status" aria-live="polite"${status ? ` data-kind="${status.kind}"` : ' hidden'}${statusTiming}>
+					<i class="codicon ${statusIcon}" aria-hidden="true"></i>
+					<div class="dim-status-body">
+						<div class="dim-status-message">${escapeHtmlText(status?.message ?? '')}</div>
+						<ol class="dim-status-steps">${statusSteps}</ol>
+						<div class="dim-status-detail">${escapeHtmlText(status?.detail ?? '')}</div>
+						<div class="dim-status-elapsed">${escapeHtmlText(statusElapsed)}</div>
+					</div>
+				</div>`;
 
 	return /* html */`<!DOCTYPE html>
 		<html lang="en">
@@ -289,20 +349,97 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 					height: 100%;
 					width: 100%;
 				}
+				/* Pinned to the viewport rather than laid out after the diagram surface, so
+				   the README stays on screen even before the webview script has run. */
 				.dim-readme {
+					position: absolute;
+					inset: 0;
 					box-sizing: border-box;
-					height: 100%;
-					width: 100%;
 					overflow: auto;
 					padding: 24px 32px;
 					max-width: 720px;
 					margin: 0 auto;
-					white-space: pre-wrap;
-					word-break: break-word;
 					line-height: 1.6;
 					font-family: var(--vscode-font-family);
 					font-size: var(--vscode-font-size);
 					color: var(--vscode-foreground);
+				}
+				.dim-readme-text {
+					white-space: pre-wrap;
+					word-break: break-word;
+				}
+				.dim-readme-placeholder {
+					color: var(--vscode-descriptionForeground);
+				}
+				/* While the banner reports progress or a failure it replaces the placeholder. */
+				.dim-status:not([hidden]) ~ .dim-readme-placeholder {
+					display: none;
+				}
+				.dim-status {
+					display: flex;
+					align-items: flex-start;
+					gap: 8px;
+					margin-bottom: 16px;
+					padding: 8px 12px;
+					border-radius: 6px;
+					border: 1px solid var(--vscode-editorWidget-border, transparent);
+					background: var(--vscode-editorWidget-background);
+				}
+				.dim-status[hidden] {
+					display: none;
+				}
+				.dim-status .codicon {
+					flex: none;
+					line-height: inherit;
+				}
+				.dim-status[data-kind="failed"] {
+					border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+					background: var(--vscode-inputValidation-errorBackground, var(--vscode-editorWidget-background));
+				}
+				.dim-status[data-kind="failed"] .codicon {
+					color: var(--vscode-errorForeground);
+				}
+				.dim-status-body {
+					min-width: 0;
+					word-break: break-word;
+				}
+				/* A running banner's spinner sits on the current step, so hide the lead icon. */
+				.dim-status[data-kind="running"] > .codicon {
+					display: none;
+				}
+				.dim-status-message {
+					font-weight: 600;
+				}
+				.dim-status-steps {
+					list-style: none;
+					margin: 6px 0 0;
+					padding: 0;
+				}
+				.dim-status-steps:empty {
+					display: none;
+				}
+				.dim-status-steps li {
+					display: flex;
+					align-items: center;
+					gap: 6px;
+				}
+				.dim-status-steps li[data-state="pending"] {
+					color: var(--vscode-descriptionForeground);
+				}
+				.dim-status-steps li[data-state="done"] .codicon {
+					color: var(--vscode-testing-iconPassed, var(--vscode-foreground));
+				}
+				.dim-status-detail,
+				.dim-status-elapsed {
+					color: var(--vscode-descriptionForeground);
+				}
+				.dim-status-elapsed {
+					margin-top: 4px;
+					font-variant-numeric: tabular-nums;
+				}
+				.dim-status-detail:empty,
+				.dim-status-elapsed:empty {
+					display: none;
 				}
 				.zoom-controls {
 					position: absolute;
@@ -359,7 +496,10 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 			<pre class="mermaid">
 				${escapeHtmlText(mermaidSource)}
 			</pre>
-			<div class="dim-readme"${initialIsReadme ? '' : ' style="display: none;"'}>${escapeHtmlText(readmeText)}</div>
+			<div class="dim-readme"${initialIsReadme ? '' : ' style="display: none;"'}>
+				${statusBanner}
+				<div class="dim-readme-text${readmePlaceholder ? ' dim-readme-placeholder' : ''}">${escapeHtmlText(readmeText)}</div>
+			</div>
 			<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
 		</html>`;

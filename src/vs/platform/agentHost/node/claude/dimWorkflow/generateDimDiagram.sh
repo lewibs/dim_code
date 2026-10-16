@@ -28,6 +28,17 @@
 # record as `sourceHash`: the record is (re)generated only when it does not exist
 # yet or when the source has changed since it was last generated, so repeated
 # opens of an unchanged file cost nothing.
+#
+# Exit status tells the caller what happened, so the editor can show it (the agent
+# hook ignores it). On a failure, stderr carries any detail (e.g. Claude's error).
+#   0  generated, already up to date, or nothing to do
+#   3  the Claude CLI was not found
+#   5  Claude exited with an error
+#   6  Claude's reply was not the expected JSON object
+# Keep these codes in sync with `dimGenerate.ts` in the mermaid-markdown-features extension.
+#
+# While it works, it prints a "DIM_PROGRESS <step>" line on stdout as it starts each
+# step (reading, claude, saving), which the editor shows as live progress.
 
 SRC="$1"
 OUT="$2"
@@ -91,8 +102,16 @@ fi
 if [ -z "$claudeBin" ]; then
 	echo "generateDimDiagram: claude CLI not found; leaving $REL as raw."
 	[ -f "$OUT" ] || writeEmptyRecord
-	exit 0
+	exit 3
 fi
+
+# Reports the step now starting (see the header); the step names are a contract with
+# `dimGenerate.ts`.
+progress() {
+	echo "DIM_PROGRESS $1"
+}
+
+progress reading
 
 # Gather the file's direct local imports so types it references but does not itself
 # declare are not drawn empty. Each workspace-relative specifier (./ or ../) is
@@ -240,12 +259,23 @@ $importBlock
 PROMPT_HEADER
 )
 
-timeoutCmd=""
-if command -v timeout >/dev/null 2>&1; then
-	timeoutCmd="timeout 90"
-fi
+progress claude
 
-result=$(printf '%s' "$prompt" | $timeoutCmd "$claudeBin" -p --model haiku 2>/dev/null)
+# No time limit: Claude runs until it answers or fails, and the editor shows progress
+# meanwhile. Keep Claude's stderr (rather than discarding it) so a failure can say why.
+errFile="$OUT.err.$$"
+result=$(printf '%s' "$prompt" | "$claudeBin" -p --model haiku 2>"$errFile")
+claudeStatus=$?
+claudeError=$(head -c 500 "$errFile" 2>/dev/null)
+rm -f "$errFile"
+if [ "$claudeStatus" -ne 0 ]; then
+	echo "generateDimDiagram: Claude exited with $claudeStatus for $REL; leaving as raw."
+	# Claude may report its error on stdout instead (e.g. a login prompt).
+	[ -n "$claudeError" ] || claudeError=$(printf '%s' "$result" | head -c 500)
+	printf '%s\n' "$claudeError" >&2
+	[ -f "$OUT" ] || writeEmptyRecord
+	exit 5
+fi
 
 # Strip any stray markdown code fences the model may have added, then drop any leading
 # blank lines so the opening brace lands on the first line for the inject step below.
@@ -256,8 +286,10 @@ firstChar=$(printf '%s' "$result" | sed -e 's/^[[:space:]]*//' | cut -c1)
 if [ "$firstChar" != "{" ]; then
 	echo "generateDimDiagram: Claude output unusable for $REL; leaving as raw."
 	[ -f "$OUT" ] || writeEmptyRecord
-	exit 0
+	exit 6
 fi
+
+progress saving
 
 # Wrap the model's object into the record by injecting our fields right after its
 # opening brace, keeping the model's "readme" and "diagrams" fields intact. Only the

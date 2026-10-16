@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
-import { getMermaidEditorHtml } from './editorManager';
+import { getMermaidEditorHtml, IDimStatusBanner } from './editorManager';
+import { DimGenerationStatus, DimGenerationStep } from './dimGenerate';
 import { parseDimReadme, parseDimRecord } from './dimRecord';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
@@ -56,12 +57,24 @@ interface IDimNavigateTarget {
 	readonly diagramType?: string;
 }
 
+/**
+ * The generator's steps as listed in the README's progress banner, in the order it runs
+ * them. Each `id` is a {@link DimGenerationStep} the generator announces.
+ */
+const generationSteps: readonly { readonly id: DimGenerationStep; readonly label: () => string }[] = [
+	{ id: 'reading', label: () => vscode.l10n.t("Read the file and its imports") },
+	{ id: 'claude', label: () => vscode.l10n.t("Generating diagrams") },
+	{ id: 'saving', label: () => vscode.l10n.t("Save the overview and diagrams") },
+];
+
 /** One switchable view in the editor: the README overview (`text`) or a diagram (`mermaid`). */
 interface IDimViewEntry {
 	readonly type: string;
 	readonly label: string;
 	readonly mermaid?: string;
 	readonly text?: string;
+	/** Set on the README view when the file has no overview yet. */
+	readonly placeholder?: boolean;
 }
 
 /** An open Dim editor: its panel, the record it reads, its views and the one shown. */
@@ -99,11 +112,20 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
-		private readonly _webviewManager: MermaidWebviewManager
+		private readonly _webviewManager: MermaidWebviewManager,
+		private readonly _generationStatus: DimGenerationStatus
 	) {
 		super();
 
 		this._register(vscode.commands.registerCommand(showDiagramCommand, (uri: string, type: string) => this._showDiagram(uri, type)));
+		// Show generation progress and failures as they happen. The banner is updated in
+		// place (no reload), so the shown view and its pan/zoom are left alone.
+		this._register(this._generationStatus.onDidChange(uri => {
+			const view = this._views.get(uri);
+			if (view) {
+				view.panel.webview.postMessage({ type: 'dimStatus', status: this._statusBanner(uri, view) });
+			}
+		}));
 	}
 
 	public openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
@@ -119,9 +141,16 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'chat-webview-out')]
 		};
 
-		// Ask the workbench where this file's `.dim` record lives (seeding a placeholder
-		// if needed). The record is a sidecar outside the workspace, read via `fs`.
-		const recordUriStr = await vscode.commands.executeCommand<string | undefined>(resolveRecordCommand, key);
+		// Ask the workbench where this file's `.dim` record lives (seeding an empty one
+		// if needed). The record is a sidecar outside the workspace, read via `fs`. If the
+		// lookup fails, still render (the README explains there is no overview) rather
+		// than leaving a blank page.
+		let recordUriStr: string | undefined;
+		try {
+			recordUriStr = await vscode.commands.executeCommand<string | undefined>(resolveRecordCommand, key);
+		} catch {
+			recordUriStr = undefined;
+		}
 		const recordUri = recordUriStr ? vscode.Uri.parse(recordUriStr) : undefined;
 
 		const view: IDimView = {
@@ -138,7 +167,7 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 				const selectedIndex = selectedType ? view.views.findIndex(v => v.type === selectedType) : -1;
 				const defaultIndex = view.views.length > 1 ? 1 : 0;
 				view.index = selectedIndex >= 0 ? selectedIndex : defaultIndex;
-				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index, /*clickable*/ true);
+				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index, /*clickable*/ true, this._statusBanner(key, view));
 			}
 		};
 		this._views.set(key, view);
@@ -204,6 +233,43 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 	}
 
 	/**
+	 * Builds the README's status banner for a source file from its latest generation
+	 * run: progress while Claude works, or why the run failed. `undefined` when there
+	 * is nothing to report.
+	 *
+	 * @param uri The source file URI, as a string.
+	 * @param view The open editor, used to tell a first generation from an update.
+	 */
+	private _statusBanner(uri: string, view: IDimView): IDimStatusBanner | undefined {
+		const state = this._generationStatus.get(uri);
+		if (!state) {
+			return undefined;
+		}
+		if (state.kind === 'running') {
+			const hasOverview = view.views.length > 0 && !view.views[0].placeholder;
+			// Before the generator announces its first step, show the first as current.
+			const current = Math.max(0, generationSteps.findIndex(step => step.id === state.step));
+			return {
+				kind: 'running',
+				message: hasOverview
+					? vscode.l10n.t("Updating the overview and diagrams for this file's latest changes…")
+					: vscode.l10n.t("Generating an overview and diagrams for this file…"),
+				steps: generationSteps.map((step, index) => ({
+					label: step.label(),
+					state: index < current ? 'done' : index === current ? 'current' : 'pending',
+				})),
+				startedAt: state.startedAt,
+				elapsedLabel: vscode.l10n.t("{0}s elapsed"),
+			};
+		}
+		return {
+			kind: 'failed',
+			message: vscode.l10n.t("Couldn't generate the overview and diagrams for this file."),
+			detail: vscode.l10n.t("{0} Reopen this file to try again.", state.message),
+		};
+	}
+
+	/**
 	 * Forwards a diagram click to the workbench's navigation command, which maps the
 	 * clicked box or member to a source file or companion `.dim` view and opens it.
 	 *
@@ -224,15 +290,15 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 }
 
 /**
- * Builds the always-present README view from a record's stored overview, falling
- * back to a "being generated" message when the record has none yet (freshly seeded,
- * or generation has not produced an overview).
+ * Builds the always-present README view from a record's stored overview. When the
+ * record has none yet the view is an empty placeholder; the status banner fills it
+ * while a generation run is in progress or has failed.
  */
 function buildReadmeView(readme: string | undefined): IDimViewEntry {
-	const text = readme && readme.length > 0
-		? readme
-		: vscode.l10n.t("The overview for this file is still being generated…");
-	return { type: readmeViewType, label: vscode.l10n.t('README'), text };
+	if (readme && readme.length > 0) {
+		return { type: readmeViewType, label: vscode.l10n.t('README'), text: readme };
+	}
+	return { type: readmeViewType, label: vscode.l10n.t('README'), text: '', placeholder: true };
 }
 
 /**

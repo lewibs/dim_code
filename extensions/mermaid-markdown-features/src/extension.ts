@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 import { registerChatSupport } from './chatOutputRenderer';
 import { DimEditorProvider, dimEditorViewType } from './dimEditor';
-import { registerDimGenerate } from './dimGenerate';
+import { DimGenerationStatus, registerDimGenerate } from './dimGenerate';
 import { MermaidEditorManager } from './editorManager';
 import { configSection, injectMermaidConfig } from './markdownMermaid/config';
 import { extendMarkdownItWithMermaid } from './markdownMermaid/markdownIt';
@@ -25,11 +25,15 @@ export function activate(context: vscode.ExtensionContext) {
 	// that renders their companion `.dim` record as a mermaid diagram. The provider
 	// also registers the `_dim.showDiagram` command the native view toggle uses, so
 	// hold onto it for disposal.
-	const dimEditorProvider = new DimEditorProvider(context.extensionUri, webviewManager);
+	// The generation status is shared: the generate command records each run's
+	// progress or failure, and the editor's README view shows it.
+	const dimGenerationStatus = new DimGenerationStatus();
+	context.subscriptions.push(dimGenerationStatus);
+	const dimEditorProvider = new DimEditorProvider(context.extensionUri, webviewManager, dimGenerationStatus);
 	context.subscriptions.push(dimEditorProvider);
 	// The workbench fires this (on file open) to (re)generate a file's `.dim` record;
 	// it runs in the extension host because generation needs a child process.
-	context.subscriptions.push(registerDimGenerate());
+	context.subscriptions.push(registerDimGenerate(dimGenerationStatus));
 	context.subscriptions.push(vscode.window.registerCustomEditorProvider(
 		dimEditorViewType,
 		dimEditorProvider,
