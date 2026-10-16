@@ -642,10 +642,107 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				.dim-clickable-member:hover {
 					text-decoration: underline;
 				}
+				/* A member row lights up as a whole, like a list item, instead of underlining. */
+				:is(.members-group, .methods-group) > .dim-clickable-member:hover {
+					text-decoration: none;
+				}
+				:is(.members-group, .methods-group) > .dim-clickable-member:hover foreignObject > div {
+					border-radius: 2px;
+					background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+					box-shadow: inset 2px 0 var(--vscode-focusBorder);
+					color: var(--vscode-foreground);
+				}
+				:where(.dim-clickable-node:hover) > .dim-card,
+				:where(rect.dim-clickable-node:hover) {
+					stroke: var(--vscode-focusBorder) !important;
+				}
 				/* The wide, transparent hit area over a sequence message's arrow. */
 				.dim-hit-area.dim-clickable-member:hover {
 					stroke: var(--vscode-focusBorder) !important;
 					stroke-opacity: 0.35;
+				}
+				/* The Dim editor draws diagrams like the editor's own widgets: rounded cards with a
+				   hairline border on a dotted canvas, quiet edges, and labels on a chip. Every rule
+				   is wrapped in :where() so it has no specificity and the change colors below win;
+				   !important beats the styles mermaid writes into the diagram. */
+				body[data-dim-clickable="true"] {
+					--dim-card-background: color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background));
+					--dim-card-border: color-mix(in srgb, var(--vscode-foreground) 20%, var(--vscode-editor-background));
+					--dim-edge: color-mix(in srgb, var(--vscode-foreground) 45%, var(--vscode-editor-background));
+					--dim-muted: var(--vscode-descriptionForeground);
+				}
+				body[data-dim-clickable="true"] .mermaid-wrapper {
+					background-color: var(--vscode-editor-background);
+					background-image: radial-gradient(circle, var(--vscode-editorWidget-border, var(--vscode-panel-border)) 1px, transparent 1px);
+					background-size: 20px 20px;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.dim-card, rect.actor, .cluster rect, .node > .label-container:is(rect, polygon, path), .node :is(.outer-path, .label-container) :is(path, rect, polygon)) {
+					fill: var(--dim-card-background) !important;
+					stroke: var(--dim-card-border) !important;
+					stroke-width: 1px !important;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.dim-card, rect.actor, .node > rect.label-container) {
+					rx: 8px;
+					filter: drop-shadow(0 4px 8px rgb(0 0 0 / 0.25));
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.cluster rect) {
+					rx: 8px;
+					fill: transparent !important;
+					stroke-dasharray: 4 4;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.dim-card-replaced) {
+					display: none;
+				}
+				/* An entity's rows sit on its card, divided by hairlines rather than stripes. */
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.row-rect-odd, .row-rect-even) path {
+					fill: transparent !important;
+					stroke: none !important;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.divider path) {
+					fill: none !important;
+					stroke: var(--dim-card-border) !important;
+					stroke-width: 1px !important;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.label-group .nodeLabel, text.actor, text.actor tspan) {
+					font-weight: 600;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.annotation-group .nodeLabel, :is(.members-group, .methods-group) .nodeLabel, .attribute-type .nodeLabel, .attribute-keys .nodeLabel) {
+					color: var(--dim-muted) !important;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.annotation-group .nodeLabel) {
+					font-style: italic;
+					font-weight: 400;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.edgePaths path, path.relation, path.transition, path.flowchart-link, path.relationshipLine, .messageLine0, .messageLine1) {
+					stroke: var(--dim-edge) !important;
+					stroke-width: 1.5px !important;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(marker path, marker circle, .marker) {
+					stroke: var(--dim-edge) !important;
+				}
+				/* An entity relationship's "zero" end is an open ring. */
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(marker circle) {
+					fill: var(--vscode-editor-background) !important;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.actor-line) {
+					stroke: var(--dim-card-border) !important;
+					stroke-dasharray: 4 4;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.edgeLabel .labelBkg, span.edgeLabel, .edgeLabel rect) {
+					background-color: var(--vscode-editor-background) !important;
+					fill: var(--vscode-editor-background) !important;
+					opacity: 1 !important;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.edgeLabel .labelBkg) {
+					border-radius: 4px;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(span.edgeLabel, span.edgeLabel p) {
+					color: var(--dim-muted) !important;
+					font-size: 12px;
+				}
+				:where(body[data-dim-clickable="true"] .mermaid svg) :where(.messageText) {
+					fill: var(--vscode-foreground) !important;
+					stroke: none !important;
 				}
 				/* What changed since the user last reviewed it, in the theme's git decoration colors. */
 				.dim-change-added {

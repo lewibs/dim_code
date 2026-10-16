@@ -2,10 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import mermaid from 'mermaid';
-import { buildMermaidConfig, createMermaidErrorElement, loadExtensionConfig, markVsCodeContextAsError } from '../shared';
+import mermaid, { MermaidConfig } from 'mermaid';
+import { buildMermaidConfig, createMermaidErrorElement, loadExtensionConfig, markVsCodeContextAsError, registerMermaidAddons } from '../shared';
 import { VsCodeMermaidThemeTracker } from '../shared/vsCodeTheme';
 import { DimChange, DimNavigate, enhanceDiagramClickability, markDiagramChanges } from './dimClickable';
+import { roundDiagramBoxes, withDimDiagramLayout } from './dimDiagramStyle';
 import { VsCodeApi } from './vscodeApi';
 
 interface PanZoomState {
@@ -406,12 +407,12 @@ interface PersistedState {
 async function rerenderMermaidDiagram(
 	diagramElement: HTMLElement,
 	diagramText: string,
-	themeTracker: VsCodeMermaidThemeTracker,
+	config: MermaidConfig,
 ): Promise<void> {
 	diagramElement.textContent = diagramText;
 	delete diagramElement.dataset.processed;
 
-	mermaid.initialize(buildMermaidConfig(loadExtensionConfig(), themeTracker));
+	mermaid.initialize(config);
 	await mermaid.run({
 		nodes: [diagramElement]
 	});
@@ -578,6 +579,15 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	// Capture diagram state
 	const diagramText = diagram.textContent ?? '';
 	const themeTracker = new VsCodeMermaidThemeTracker();
+	// In the Dim editor the diagram's boxes and member rows are clickable, each one a
+	// link into the source or a companion `.dim` view; the plain mermaid preview panel
+	// leaves this off. The Dim editor also lays diagrams out with ELK and draws their
+	// boxes as rounded cards.
+	const clickable = document.body.dataset.dimClickable === 'true';
+	const mermaidConfig = (): MermaidConfig => {
+		const config = buildMermaidConfig(loadExtensionConfig(), themeTracker);
+		return clickable ? withDimDiagramLayout(config) : config;
+	};
 	const state: LocalState = {
 		mermaidSource: diagramText,
 	};
@@ -615,7 +625,9 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 		wrapper.style.display = 'none';
 	}
 
-	mermaid.initialize(buildMermaidConfig(loadExtensionConfig(), themeTracker));
+	// Registers the ELK layout (among other add-ons) that the Dim editor's config asks for.
+	await registerMermaidAddons();
+	mermaid.initialize(mermaidConfig());
 
 	// Only render the diagram up front when a diagram shows first; when the README
 	// shows first the `.mermaid` element is empty and running mermaid on it would
@@ -641,21 +653,19 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	const panZoomHandler = new PanZoomHandler(wrapper, content, vscode, options);
 	panZoomHandler.initialize();
 
-	// In the Dim editor the diagram's boxes and member rows are clickable, each one a
-	// link into the source or a companion `.dim` view; the plain mermaid preview panel
-	// leaves this off. Every click posts a `dimNavigate` message the extension resolves
-	// to a concrete resource. A click is routed only when the pointer did not just pan.
-	const clickable = document.body.dataset.dimClickable === 'true';
+	// Every click posts a `dimNavigate` message the extension resolves to a concrete
+	// resource. A click is routed only when the pointer did not just pan.
 	const navigate: DimNavigate = target => vscode.postMessage({ type: 'dimNavigate', target });
 
 	// The view the page shows, so a request for it again (the extension re-sends the
 	// current view once the page is ready) does not re-render it and reset pan/zoom.
 	let shownIndex = Number(document.body.dataset.dimIndex ?? 0);
 
-	// Wires the rendered diagram's click targets and colors the changes waiting for
-	// review, both on the SVG mermaid just rendered.
+	// Rounds the rendered diagram's boxes, wires its click targets and colors the
+	// changes waiting for review, all on the SVG mermaid just rendered.
 	const enhanceDiagram = (): void => {
 		if (clickable) {
+			roundDiagramBoxes(diagram);
 			enhanceDiagramClickability(diagram, navigate, () => panZoomHandler.didJustDrag());
 		}
 		const shown = readDimViews()[shownIndex];
@@ -687,7 +697,7 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 			const transform = content.style.transform;
 			content.style.transform = 'none';
 			try {
-				await rerenderMermaidDiagram(diagram, source, themeTracker);
+				await rerenderMermaidDiagram(diagram, source, mermaidConfig());
 			} finally {
 				content.style.transform = transform;
 			}
