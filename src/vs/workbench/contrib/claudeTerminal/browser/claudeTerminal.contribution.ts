@@ -10,7 +10,9 @@ import { FileAccess } from '../../../../base/common/network.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
-import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ConfigurationScope, EditPresentationTypes, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
@@ -43,7 +45,51 @@ import { ITerminalInstance, ITerminalService } from '../../terminal/browser/term
 export const CLAUDE_TERMINAL_VIEW_CONTAINER_ID = 'workbench.view.claudeTerminal';
 export const CLAUDE_TERMINAL_VIEW_ID = 'workbench.view.claudeTerminal.view';
 
-const CLAUDE_TERMINAL_COMMAND = 'claude';
+/**
+ * The command the Claude Code terminal runs when its session starts. `${pluginDir}`
+ * stands for Dim's built-in plugin folder (skills and hooks), quoted for the shell.
+ */
+const CLAUDE_TERMINAL_START_COMMAND_SETTING = 'dim.startCommand';
+const CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE = '${pluginDir}';
+const CLAUDE_TERMINAL_DEFAULT_START_COMMAND = `claude --plugin-dir ${CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE}`;
+
+/** Resets {@link CLAUDE_TERMINAL_START_COMMAND_SETTING} to its default; linked from the setting's description. */
+const CLAUDE_TERMINAL_RESET_START_COMMAND_ID = 'dim.resetStartCommand';
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	id: 'dim',
+	title: localize('dimConfigurationTitle', "Dim"),
+	type: 'object',
+	properties: {
+		[CLAUDE_TERMINAL_START_COMMAND_SETTING]: {
+			type: 'string',
+			default: CLAUDE_TERMINAL_DEFAULT_START_COMMAND,
+			editPresentation: EditPresentationTypes.Multiline,
+			// Runs in a shell, so only the user may set it, never a workspace.
+			scope: ConfigurationScope.APPLICATION,
+			markdownDescription: localize('dim.startCommand', "The command the Claude Code terminal runs to start its session. `{0}` is replaced with the folder of Dim's built-in skills and hooks; leave `--plugin-dir {0}` in to keep them. Each line runs in order. Takes effect the next time the session starts. [Reset to Default](command:{1})", CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE, CLAUDE_TERMINAL_RESET_START_COMMAND_ID),
+		},
+	},
+});
+
+CommandsRegistry.registerCommand(CLAUDE_TERMINAL_RESET_START_COMMAND_ID, accessor =>
+	accessor.get(IConfigurationService).updateValue(CLAUDE_TERMINAL_START_COMMAND_SETTING, undefined, ConfigurationTarget.USER));
+
+/**
+ * Builds the shell command that starts the Claude session from the user's start command,
+ * filling in `${pluginDir}` with the quoted plugin folder. Without a plugin folder the
+ * `--plugin-dir ${pluginDir}` argument is dropped, so the command still runs.
+ *
+ * @param startCommand The configured start command.
+ * @param pluginRoot Dim's built-in plugin folder, if it could be written.
+ */
+function resolveStartCommand(startCommand: string, pluginRoot: URI | undefined): string {
+	if (!pluginRoot) {
+		return startCommand.split(` --plugin-dir ${CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE}`).join('').split(CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE).join('');
+	}
+	const quoted = `'${pluginRoot.fsPath.replace(/'/g, `'\\''`)}'`;
+	return startCommand.split(CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE).join(quoted);
+}
 
 const claudeTerminalIcon = registerIcon('claude-terminal-view-icon', Codicon.terminal, localize('claudeTerminalViewIcon', 'View icon of the Claude Code terminal view.'));
 
@@ -121,10 +167,8 @@ class ClaudeTerminalViewPane extends ViewPane {
 			// skills and agent hook via a bundled plugin so they apply automatically
 			// in every workspace with no dependency on `~/.claude` or a project `.claude/`.
 			const pluginRoot = await this._ensureBuiltinPlugin();
-			const command = pluginRoot
-				? `${CLAUDE_TERMINAL_COMMAND} --plugin-dir '${pluginRoot.fsPath.replace(/'/g, `'\\''`)}'`
-				: CLAUDE_TERMINAL_COMMAND;
-			await instance.sendText(command, true);
+			const startCommand = this.configurationService.getValue<string>(CLAUDE_TERMINAL_START_COMMAND_SETTING)?.trim() || CLAUDE_TERMINAL_DEFAULT_START_COMMAND;
+			await instance.sendText(resolveStartCommand(startCommand, pluginRoot), true);
 		} finally {
 			this._creating = false;
 		}
