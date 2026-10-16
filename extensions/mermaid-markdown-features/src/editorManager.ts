@@ -26,9 +26,9 @@ export interface IDimWebviewView {
 	readonly placeholder?: boolean;
 	/** On the README view of a test file: its tests, shown as a table under the overview. */
 	readonly tests?: readonly IDimTestCase[];
-	/** For a diagram: the elements the file's uncommitted changes touched, colored by change. */
+	/** For a diagram: the elements the file's changes waiting for review touched, colored by change. */
 	readonly changes?: readonly IDimChange[];
-	/** For a diagram of a file that is new since the last commit: all of it is colored as added. */
+	/** For a diagram of a file git does not track yet: all of it is colored as added. */
 	readonly isNew?: boolean;
 }
 
@@ -280,8 +280,11 @@ class MermaidPreview extends Disposable {
  * editor turns this on; the plain preview panel leaves it off).
  * @param status The generation progress or failure to show atop the README view, if any.
  * Later changes arrive as `dimStatus` messages.
+ * @param reviewPending Whether the file has changes waiting for review, which shows the
+ * review bar (a legend of the change colors, and Accept All / Reject All). Later changes
+ * arrive as `dimReview` messages.
  */
-export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, views: readonly IDimWebviewView[], diagramId: string, initialIndex: number = 0, clickable: boolean = false, status?: IDimStatusBanner): string {
+export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, views: readonly IDimWebviewView[], diagramId: string, initialIndex: number = 0, clickable: boolean = false, status?: IDimStatusBanner, reviewPending: boolean = false): string {
 	const nonce = generateUuid();
 
 	const mediaRoot = vscode.Uri.joinPath(extensionUri, 'chat-webview-out');
@@ -334,6 +337,17 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 						<div class="dim-status-elapsed">${escapeHtmlText(statusElapsed)}</div>
 					</div>
 				</div>`;
+
+	// Always in the Dim editor's page (only it reviews changes), so `dimReview` messages can
+	// show or hide it. Its buttons post `dimReview` messages back.
+	const reviewBar = clickable ? `<div class="dim-review" role="toolbar" aria-label="${escapeHtmlText(vscode.l10n.t("Changes Waiting for Review"))}"${reviewPending ? '' : ' hidden'}>
+				<span class="dim-review-title">${escapeHtmlText(vscode.l10n.t("Changes waiting for review"))}</span>
+				<span class="dim-review-legend dim-change-added">${escapeHtmlText(vscode.l10n.t("Added"))}</span>
+				<span class="dim-review-legend dim-change-changed">${escapeHtmlText(vscode.l10n.t("Changed"))}</span>
+				<span class="dim-review-legend dim-change-removed">${escapeHtmlText(vscode.l10n.t("Removed"))}</span>
+				<button class="dim-review-accept" data-accept="true" title="${escapeHtmlText(vscode.l10n.t("Accept All Changes in the Workspace"))}"><i class="codicon codicon-check" aria-hidden="true"></i>${escapeHtmlText(vscode.l10n.t("Accept All"))}</button>
+				<button class="dim-review-reject" data-accept="false" title="${escapeHtmlText(vscode.l10n.t("Reject All Changes in File"))}"><i class="codicon codicon-discard" aria-hidden="true"></i>${escapeHtmlText(vscode.l10n.t("Reject All"))}</button>
+			</div>` : '';
 
 	return /* html */`<!DOCTYPE html>
 		<html lang="en">
@@ -526,6 +540,77 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 					background: var(--vscode-toolbar-activeBackground);
 					color: var(--vscode-focusBorder);
 				}
+				/* Floats over the bottom of the view, like the chat editing review toolbar. */
+				.dim-review {
+					position: fixed;
+					bottom: 16px;
+					left: 50%;
+					transform: translateX(-50%);
+					z-index: 100;
+					display: flex;
+					align-items: center;
+					gap: 10px;
+					max-width: calc(100% - 32px);
+					box-sizing: border-box;
+					padding: 4px 4px 4px 12px;
+					background: var(--vscode-editorWidget-background);
+					color: var(--vscode-foreground);
+					border: 1px solid var(--vscode-editorWidget-border);
+					border-radius: 6px;
+					box-shadow: var(--vscode-shadow-md, 0 2px 8px var(--vscode-widget-shadow));
+					font-family: var(--vscode-font-family);
+					font-size: var(--vscode-font-size);
+					white-space: nowrap;
+				}
+				.dim-review[hidden] {
+					display: none;
+				}
+				.dim-review-title {
+					color: var(--vscode-descriptionForeground);
+					overflow: hidden;
+					text-overflow: ellipsis;
+				}
+				.dim-review-legend {
+					display: flex;
+					align-items: center;
+					gap: 4px;
+				}
+				.dim-review-legend::before {
+					content: '';
+					width: 10px;
+					height: 10px;
+					border-radius: 2px;
+					border: 2px solid var(--dim-change);
+					background: color-mix(in srgb, var(--dim-change) 22%, var(--vscode-editor-background));
+				}
+				.dim-review button {
+					display: flex;
+					align-items: center;
+					gap: 4px;
+					padding: 3px 8px;
+					border: 1px solid var(--vscode-button-border, transparent);
+					border-radius: 4px;
+					font: inherit;
+					cursor: pointer;
+				}
+				.dim-review button:disabled {
+					opacity: 0.6;
+					cursor: default;
+				}
+				.dim-review-accept {
+					background: var(--vscode-button-background);
+					color: var(--vscode-button-foreground);
+				}
+				.dim-review-accept:hover:not(:disabled) {
+					background: var(--vscode-button-hoverBackground);
+				}
+				.dim-review-reject {
+					background: var(--vscode-button-secondaryBackground);
+					color: var(--vscode-button-secondaryForeground);
+				}
+				.dim-review-reject:hover:not(:disabled) {
+					background: var(--vscode-button-secondaryHoverBackground);
+				}
 				/* Clickable diagram boxes and member rows (Dim editor only). */
 				.dim-clickable {
 					cursor: pointer;
@@ -541,7 +626,7 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 					stroke: var(--vscode-focusBorder) !important;
 					stroke-opacity: 0.35;
 				}
-				/* What changed since the last commit, in the theme's git decoration colors. */
+				/* What changed since the user last reviewed it, in the theme's git decoration colors. */
 				.dim-change-added {
 					--dim-change: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
 				}
@@ -591,6 +676,7 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				<div class="dim-readme-text${readmePlaceholder ? ' dim-readme-placeholder' : ''}">${escapeHtmlText(readmeText)}</div>
 				${testsSection}
 			</div>
+			${reviewBar}
 			<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
 		</html>`;

@@ -30,7 +30,10 @@
     "onCustomEditor:vscode.mermaid-markdown-features.dimEditor",
     "onCommand:_dim.showDiagram",
     "onCommand:_dim.generateRecord",
-    "onCommand:_dim.syncDiffs"
+    "onCommand:_dim.syncDiffs",
+    "onCommand:_dim.review.list",
+    "onCommand:_dim.review.readStaged",
+    "onCommand:_dim.review.stage"
   ],
   "contributes": {
     "customEditors": [

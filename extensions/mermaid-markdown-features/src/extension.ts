@@ -7,6 +7,7 @@ import { registerChatSupport } from './chatOutputRenderer';
 import { registerDimDiffSync } from './dimDiff';
 import { DimEditorProvider, dimEditorViewType } from './dimEditor';
 import { DimGenerationStatus, registerDimGenerate } from './dimGenerate';
+import { registerDimReview } from './dimReview';
 import { MermaidEditorManager } from './editorManager';
 import { configSection, injectMermaidConfig } from './markdownMermaid/config';
 import { extendMarkdownItWithMermaid } from './markdownMermaid/markdownIt';
@@ -37,6 +38,8 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(registerDimGenerate(dimGenerationStatus));
 	// The workbench fires this when git HEAD moves, to drop the change marks of committed files.
 	context.subscriptions.push(registerDimDiffSync());
+	// The workbench fires these to review changes: list them, and accept them by staging them in git.
+	context.subscriptions.push(registerDimReview());
 	context.subscriptions.push(vscode.window.registerCustomEditorProvider(
 		dimEditorViewType,
 		dimEditorProvider,

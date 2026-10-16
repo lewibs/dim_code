@@ -7,6 +7,7 @@ import { getMermaidEditorHtml, IDimStatusBanner } from './editorManager';
 import { DimGenerationStatus, DimGenerationStep } from './dimGenerate';
 import { dimFocusSymbol, IDimNavigateTarget, resolveDimNavigation } from './dimNavigate';
 import { IDimChange, IDimLink, IDimTestCase, parseDimDiff, parseDimReadme, parseDimRecord, parseDimTests } from './dimRecord';
+import { acceptAllCommand, hasPendingChanges, rejectAllCommand } from './dimReview';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
 import { MermaidWebviewManager } from './webviewManager';
@@ -66,9 +67,9 @@ interface IDimViewEntry {
 	readonly tests?: readonly IDimTestCase[];
 	/** For a diagram: what each of its clickable elements stands for in the code. */
 	readonly links?: readonly IDimLink[];
-	/** For a diagram: the elements the file's uncommitted changes touched. */
+	/** For a diagram: the elements the file's changes waiting for review touched. */
 	readonly changes?: readonly IDimChange[];
-	/** For a diagram of a file that is new since the last commit: all of it is added. */
+	/** For a diagram of a file git does not track yet: all of it is added. */
 	readonly isNew?: boolean;
 }
 
@@ -161,6 +162,11 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		}
 		const recordUri = recordUriStr ? vscode.Uri.parse(recordUriStr) : undefined;
 
+		// The file the view describes (without a focus fragment): the review bar shows while
+		// it has changes waiting for review, and rejects its changes. A big-picture record describes no file.
+		const sourceFile = isBigPictureRecord(document.uri) ? undefined : document.uri.with({ fragment: '' });
+		const isPending = async () => !!sourceFile && await hasPendingChanges(sourceFile);
+
 		const view: IDimView = {
 			panel: webviewPanel,
 			recordUri,
@@ -168,13 +174,14 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			index: 0,
 			render: async () => {
 				view.views = recordUri ? await loadViews(recordUri) : [buildReadmeView(undefined)];
+				const pending = await isPending();
 				// Show the type last selected for this source file (restored across hide/show
 				// and preserved across live re-renders); otherwise open on the always-present
 				// README overview, which is first.
 				const selectedType = this._selected.get(key);
 				const selectedIndex = selectedType ? view.views.findIndex(v => v.type === selectedType) : -1;
 				view.index = selectedIndex >= 0 ? selectedIndex : 0;
-				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index, /*clickable*/ true, this._statusBanner(key, view));
+				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index, /*clickable*/ true, this._statusBanner(key, view), pending);
 			}
 		};
 		this._views.set(key, view);
@@ -186,9 +193,20 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 
 		// A click on a diagram box or member row posts a `dimNavigate` message; forward it
 		// to the workbench, which resolves it to a source file or companion `.dim` view.
-		disposables.push(webviewPanel.webview.onDidReceiveMessage((message: { type?: string; target?: IDimNavigateTarget }) => {
+		// Shows or hides the review bar as the file gains or loses changes waiting for review,
+		// in place, so the shown view and its pan/zoom are left alone.
+		const updateReview = async () => {
+			webviewPanel.webview.postMessage({ type: 'dimReview', pending: await isPending() });
+		};
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type?: string; target?: IDimNavigateTarget; accept?: boolean }) => {
 			if (message?.type === 'dimNavigate' && message.target) {
 				void this._navigateFromDiagram(key, message.target);
+			} else if (message?.type === 'dimReview' && sourceFile) {
+				// The review bar's Accept All (every change in the workspace) / Reject All
+				// (this file's). Accepting drops the marks from the records, which re-renders
+				// the views; rejecting changes the file, so its diagrams are drawn again.
+				await vscode.commands.executeCommand(message.accept ? acceptAllCommand : rejectAllCommand, sourceFile);
+				await updateReview();
 			} else if (message?.type === 'dimReady') {
 				// The page dropped anything posted before its script listened: re-send the
 				// view to show (the toggle may have switched it meanwhile) and the status.
@@ -203,6 +221,12 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			const base = recordUri.path.substring(recordUri.path.lastIndexOf('/') + 1);
 			const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(dir, base));
 			disposables.push(watcher, watcher.onDidChange(() => view.render()), watcher.onDidCreate(() => view.render()));
+		}
+		// Edits to the file itself change what waits for review.
+		if (sourceFile) {
+			const sourceName = sourceFile.path.substring(sourceFile.path.lastIndexOf('/') + 1);
+			const sourceWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(sourceFile, '..'), sourceName));
+			disposables.push(sourceWatcher, sourceWatcher.onDidChange(updateReview), sourceWatcher.onDidCreate(updateReview), sourceWatcher.onDidDelete(updateReview));
 		}
 
 		disposables.push(webviewPanel.onDidChangeViewState(e => {

@@ -539,11 +539,29 @@ function applyDimStatus(status: DimStatusBanner | undefined): void {
 }
 
 export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZoomOptions): Promise<PanZoomHandler | undefined> {
-	// Generation progress can change at any moment, including while the first diagram
-	// renders below, so listen for it before anything is awaited.
+	// The review bar's Accept All / Reject All accept every change in the workspace and reject this file's. Both stay
+	// disabled from a click until the extension reports the file's review state again.
+	const reviewBar = document.querySelector<HTMLElement>('.dim-review');
+	const reviewButtons = Array.from(reviewBar?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+	for (const button of reviewButtons) {
+		button.addEventListener('click', () => {
+			for (const other of reviewButtons) {
+				other.disabled = true;
+			}
+			vscode.postMessage({ type: 'dimReview', accept: button.dataset.accept === 'true' });
+		});
+	}
+
+	// Generation progress and the review state can change at any moment, including while
+	// the first diagram renders below, so listen for them before anything is awaited.
 	window.addEventListener('message', event => {
 		if (event.data?.type === 'dimStatus') {
 			applyDimStatus(event.data.status);
+		} else if (event.data?.type === 'dimReview' && reviewBar) {
+			reviewBar.hidden = !event.data.pending;
+			for (const button of reviewButtons) {
+				button.disabled = false;
+			}
 		}
 	});
 	// Tick the running banner's elapsed time while Claude works. The webview is torn
@@ -634,8 +652,8 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	// current view once the page is ready) does not re-render it and reset pan/zoom.
 	let shownIndex = Number(document.body.dataset.dimIndex ?? 0);
 
-	// Wires the rendered diagram's click targets and colors what changed since the last
-	// commit, both on the SVG mermaid just rendered.
+	// Wires the rendered diagram's click targets and colors the changes waiting for
+	// review, both on the SVG mermaid just rendered.
 	const enhanceDiagram = (): void => {
 		if (clickable) {
 			enhanceDiagramClickability(diagram, navigate, () => panZoomHandler.didJustDrag());

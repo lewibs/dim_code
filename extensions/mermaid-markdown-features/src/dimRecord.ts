@@ -18,7 +18,7 @@ export interface IDimDiagramView {
 	readonly mermaid: string;
 	/** What each clickable element of the diagram stands for in the code. */
 	readonly links: readonly IDimLink[];
-	/** The elements the file's uncommitted changes touched; empty when there are none. */
+	/** The elements the file's changes waiting for review touched; empty when there are none. */
 	readonly changes: readonly IDimChange[];
 }
 
@@ -48,8 +48,10 @@ function parseChanges(raw: unknown): IDimChange[] {
 }
 
 /**
- * The `diff` stamp of a record drawn while its file differed from the diff base: the
- * commit the changes are measured against, and whether the file did not exist there.
+ * The `diff` stamp of a record drawn while its file differed from the diff base: what the
+ * changes are measured against (a commit for `base`, or the staged blob, `new` for an
+ * untracked file, for `pending`, the changes waiting for review), and whether the file did
+ * not exist there.
  */
 export interface IDimDiff {
 	readonly base: string;
@@ -67,8 +69,9 @@ export function parseDimDiff(content: string): IDimDiff | undefined {
 		return undefined;
 	}
 	try {
-		const diff = (JSON.parse(content) as { diff?: { base?: unknown; new?: unknown } }).diff;
-		return diff && typeof diff.base === 'string' && diff.base.length > 0 ? { base: diff.base, isNew: diff.new === true } : undefined;
+		const diff = (JSON.parse(content) as { diff?: { base?: unknown; pending?: unknown; new?: unknown } }).diff;
+		const base = diff?.base ?? diff?.pending;
+		return diff && typeof base === 'string' && base.length > 0 ? { base, isNew: diff.new === true } : undefined;
 	} catch {
 		return undefined;
 	}

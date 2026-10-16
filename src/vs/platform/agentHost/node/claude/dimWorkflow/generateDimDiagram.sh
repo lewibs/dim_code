@@ -30,8 +30,9 @@
 # The focus kinds mirror `DimFocusKind` in dimHookStorage.ts; keep the two in sync.
 #
 # Environment:
-#   DIM_DIFF_BASE - optional: the git revision the diagrams show changes against
-#                   (default HEAD, i.e. the changes not committed yet). Lets another
+#   DIM_DIFF_BASE - optional: a git revision for the diagrams to show changes against.
+#                   By default they show the changes waiting for review: the ones not
+#                   accepted (staged in git) yet, see `dimPendingEdits.ts`. Lets another
 #                   caller draw the changes between two versions instead.
 #
 # Regeneration is gated on the source's content hash, which is stamped into the
@@ -106,9 +107,26 @@ esac
 diffState=none
 diffText=""
 baseSha=""
+pendingHash=""
 srcDir=$(dirname "$SRC")
 srcName=$(basename "$SRC")
-if git -C "$srcDir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$DIM_DIFF_BASE" ] && git -C "$srcDir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	# The changes waiting for review: the file against its staged (accepted) version.
+	# The staged blob stamps the record, so accepting some of the changes redraws it.
+	indexSha=$(git -C "$srcDir" ls-files -s -- "$srcName" 2>/dev/null | head -n1 | cut -d' ' -f2)
+	if [ -n "$indexSha" ]; then
+		pendingHash=$indexSha
+		diffText=$(git -C "$srcDir" diff --no-color --no-ext-diff -- "$srcName" 2>/dev/null | head -c 30000)
+		if [ -n "$diffText" ]; then
+			diffState=changed
+		else
+			diffState=clean
+		fi
+	elif ! git -C "$srcDir" check-ignore -q -- "$srcName" 2>/dev/null; then
+		diffState=new
+		pendingHash=new
+	fi
+elif git -C "$srcDir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	baseSha=$(git -C "$srcDir" rev-parse --verify -q "${DIM_DIFF_BASE:-HEAD}^{commit}" 2>/dev/null)
 	if [ -n "$baseSha" ]; then
 		if git -C "$srcDir" cat-file -e "$baseSha:./$srcName" 2>/dev/null; then
@@ -136,7 +154,11 @@ if [ -f "$OUT" ]; then
 	grep -q '[{,[:space:]]"diff"[[:space:]]*:' "$OUT" 2>/dev/null && hasDiff=1
 	wantsDiff=0
 	case "$diffState" in changed | new) wantsDiff=1 ;; esac
-	if [ -n "$existingHash" ] && [ "$existingHash" = "$srcHash" ] && [ "$hasDiff" = "$wantsDiff" ]; then
+	# The record must also be measured against the same staged version: accepting some of
+	# the changes redraws it.
+	existingPending=$(sed -n 's/.*"pending"[[:space:]]*:[[:space:]]*"\([0-9a-zA-Z]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n1)
+	[ "$wantsDiff" = 1 ] || pendingHash=""
+	if [ -n "$existingHash" ] && [ "$existingHash" = "$srcHash" ] && [ "$hasDiff" = "$wantsDiff" ] && [ "$existingPending" = "$pendingHash" ]; then
 		if [ "$isTestFile" = 0 ] || grep -q '"tests"[[:space:]]*:' "$OUT" 2>/dev/null; then
 			echo "generateDimDiagram: $REL unchanged; keeping existing record."
 			exit 0
@@ -344,10 +366,19 @@ fi
 # skill). A new file is shown as wholly added by the viewer, so it needs no marks.
 changesBlock=""
 changesShape=""
+if [ -n "$pendingHash" ]; then
+	changesLead="this file has changes that the user has not reviewed yet"
+	changesFrom="the reviewed code"
+	newSince="the user last reviewed the code"
+else
+	changesLead="this file has changes since its last commit"
+	changesFrom="the committed code"
+	newSince="the last commit"
+fi
 case "$diffState" in
 	changed)
 		changesBlock="
-CHANGES: this file has changes since its last commit. The diff below goes from the committed code (\"-\" lines) to the current code (\"+\" lines, the CODE above). Show the changes in every diagram as the skill's \"Showing changes\" section and your kind's skill describe: list each added, changed and removed element in the diagram's \"changes\", and keep each removed element drawn, wrapped in \"%% dim:removed\" / \"%% dim:end\" lines. The readme still describes only the current code: do not mention the changes or the diff in it, as it is kept after they are committed.
+CHANGES: $changesLead. The diff below goes from $changesFrom (\"-\" lines) to the current code (\"+\" lines, the CODE above). Show the changes in every diagram as the skill's \"Showing changes\" section and your kind's skill describe: list each added, changed and removed element in the diagram's \"changes\", and keep each removed element drawn, wrapped in \"%% dim:removed\" / \"%% dim:end\" lines. The readme still describes only the current code: do not mention the changes or the diff in it, as it is kept after they are committed.
 --- BEGIN DIFF ---
 $diffText
 --- END DIFF ---
@@ -356,7 +387,7 @@ $diffText
 		;;
 	new)
 		changesBlock="
-CHANGES: this file is new since the last commit. The viewer shows the whole diagram as added, so output no \"changes\" and no removed markers.
+CHANGES: this file is new since $newSince. The viewer shows the whole diagram as added, so output no \"changes\" and no removed markers.
 "
 		;;
 esac
@@ -433,10 +464,14 @@ if [ "$isTestFile" = 1 ] && ! printf '%s' "$result" | grep -q '"tests"[[:space:]
 fi
 # A file with changes is stamped with the commit they are measured against, which tells
 # the editor when they have been committed (see the header). `$baseSha` is plain hex.
+# Changes waiting for review are stamped with the staged blob instead, and no commit:
+# committing does not settle them, accepting or rejecting them does.
 diffField=""
+diffBase="\"base\": \"$baseSha\""
+[ -n "$pendingHash" ] && diffBase="\"pending\": \"$pendingHash\""
 case "$diffState" in
-	changed) diffField=" \"diff\": {\"base\": \"$baseSha\", \"new\": false}," ;;
-	new) diffField=" \"diff\": {\"base\": \"$baseSha\", \"new\": true}," ;;
+	changed) diffField=" \"diff\": {$diffBase, \"new\": false}," ;;
+	new) diffField=" \"diff\": {$diffBase, \"new\": true}," ;;
 esac
 tmp="$OUT.tmp.$$"
 printf '%s\n' "$result" \

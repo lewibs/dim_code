@@ -8,7 +8,8 @@ import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
-import { joinPath, relativePath } from '../../../../base/common/resources.js';
+import { isEqual, joinPath, relativePath } from '../../../../base/common/resources.js';
+import { ResourceSet } from '../../../../base/common/map.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
@@ -30,6 +31,7 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { CustomEditorInput } from '../../customEditor/browser/customEditorInput.js';
 import { customEditorViewOptions } from '../../customEditor/common/customEditorView.js';
+import { IDimPendingEditsService } from './dimPendingEdits.js';
 
 /**
  * Command run by the Dim diagram viewer to switch the currently shown diagram.
@@ -91,6 +93,12 @@ const SYNC_DIFFS_COMMAND = '_dim.syncDiffs';
  * operation makes (or a rebase's many commits) causes a single sync.
  */
 const SYNC_DIFFS_DELAY = 1000;
+
+/**
+ * How long to wait after a file's changes waiting for review change before redrawing its
+ * open diagrams, so a run of edits, or a quick series of accepts and rejects, costs one redraw.
+ */
+const PENDING_REFRESH_DELAY = 1500;
 
 /**
  * Command the diagram viewer runs when a click in a diagram resolves to another Dim
@@ -238,6 +246,17 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	 */
 	private readonly _generating = new Set<string>();
 
+	/**
+	 * Source files asked to regenerate while a run for them was in flight, whose record
+	 * must be regenerated once that run ends: the file or its pending edits changed
+	 * after the run read them.
+	 */
+	private readonly _regenerateAfterRun = new Set<string>();
+
+	/** Files whose pending edits changed, waiting for {@link _pendingRefresh} to redraw their open diagrams. */
+	private readonly _pendingChanged = new ResourceSet();
+	private readonly _pendingRefresh = this._register(new RunOnceScheduler(() => this._refreshPendingDiagrams(), PENDING_REFRESH_DELAY));
+
 	/** Each workspace folder's watch on its git HEAD, keyed by folder URI. */
 	private readonly _commitWatchers = this._register(new DisposableMap<string>());
 
@@ -252,9 +271,17 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		@ICommandService private readonly _commandService: ICommandService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@IDimPendingEditsService private readonly _pendingEditsService: IDimPendingEditsService,
 	) {
 		super();
 		this._viewAvailable = DIM_VIEW_AVAILABLE.bindTo(contextKeyService);
+
+		// Redraw a file's open diagrams when its changes waiting for review change: it is
+		// edited again, or some of its changes are accepted or rejected.
+		this._register(this._pendingEditsService.onDidChange(file => {
+			this._pendingChanged.add(file);
+			this._pendingRefresh.schedule();
+		}));
 
 		for (const type of dimDiagramTypeOrder) {
 			this._register(CommandsRegistry.registerCommand(diagramCommandId(type), () => this._showView(type)));
@@ -386,6 +413,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	private _generateRecord(sourceUri: URI, folderUri: URI, recordUri: URI): void {
 		const key = sourceUri.toString();
 		if (this._generating.has(key)) {
+			this._regenerateAfterRun.add(key);
 			return;
 		}
 		const relPath = relativePath(folderUri, sourceUri);
@@ -403,11 +431,31 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			focusSymbol: focus?.symbol,
 		})).finally(() => {
 			this._generating.delete(key);
+			if (this._regenerateAfterRun.delete(key)) {
+				this._generateRecord(sourceUri, folderUri, recordUri);
+			}
 			// The generator may have written a diagram chosen from the file's code (or
 			// left the record empty): refresh the toggle so that diagram appears without
 			// re-activating the editor.
 			void this._refreshFromRecord(sourceUri, recordUri);
 		});
+	}
+
+	/**
+	 * Regenerates the records shown by the open diagram viewers of the files whose pending
+	 * edits changed, so their diagrams color the edits still waiting for review. Raw text
+	 * editors are left alone: they show the edits themselves, and their diagrams catch up
+	 * when they are opened.
+	 */
+	private _refreshPendingDiagrams(): void {
+		const changed = [...this._pendingChanged];
+		this._pendingChanged.clear();
+		for (const editor of this._editorService.visibleEditors) {
+			const resource = this._dimInput(editor)?.resource;
+			if (resource && changed.some(file => isEqual(file, resource.with({ fragment: '' })))) {
+				void this._resolveRecordUri(resource.toString());
+			}
+		}
 	}
 
 	/**

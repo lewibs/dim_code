@@ -21,6 +21,9 @@ interface IDimSyncDiffsArgs {
 	readonly recordsUri: string;
 }
 
+/** The folder of a workspace folder that holds its `.dim` records. */
+const recordsFolderName = '.dim';
+
 /** The folder of agent-written big-picture records, which describe no single file and carry no change marks. */
 const bigPictureFolder = 'big_picture';
 
@@ -32,7 +35,7 @@ const removedEnd = '%% dim:end';
 interface IDimRecordJson {
 	source?: unknown;
 	sourceHash?: unknown;
-	diff?: { base?: unknown; new?: unknown };
+	diff?: { base?: unknown; pending?: unknown; new?: unknown };
 	diagrams?: Array<{ mermaid?: unknown; changes?: unknown; links?: unknown } | null>;
 }
 
@@ -127,6 +130,47 @@ async function syncRecord(recordUri: vscode.Uri, folder: vscode.Uri, head: strin
 		delete record.sourceHash; // the marks are out of date: let the next run redraw them
 	}
 	await vscode.workspace.fs.writeFile(recordUri, new TextEncoder().encode(JSON.stringify(record, undefined, '\t') + '\n'));
+}
+
+/**
+ * Drops the change marks from every record of a file (the whole file's, and each one focused
+ * on a symbol of it) once all its changes are accepted, so its diagrams show the file as it
+ * now is without asking Claude again. The records keep their `sourceHash`: they still
+ * describe the file's current code.
+ *
+ * @param file A source file in a workspace folder.
+ */
+export async function clearFileChanges(file: vscode.Uri): Promise<void> {
+	const folder = vscode.workspace.getWorkspaceFolder(file);
+	if (!folder) {
+		return;
+	}
+	const relative = file.path.slice(folder.uri.path.replace(/\/$/, '').length + 1);
+	const slash = relative.lastIndexOf('/');
+	const name = relative.slice(slash + 1);
+	const dir = vscode.Uri.joinPath(folder.uri, recordsFolderName, ...(slash >= 0 ? relative.slice(0, slash).split('/') : []));
+	let entries: [string, vscode.FileType][];
+	try {
+		entries = await vscode.workspace.fs.readDirectory(dir);
+	} catch {
+		return; // no records for this folder yet
+	}
+	for (const [entry, type] of entries) {
+		if (type !== vscode.FileType.File || !(entry === `${name}.dim` || (entry.startsWith(`${name}#`) && entry.endsWith('.dim')))) {
+			continue;
+		}
+		const recordUri = vscode.Uri.joinPath(dir, entry);
+		let record: IDimRecordJson;
+		try {
+			record = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(recordUri))) as IDimRecordJson;
+		} catch {
+			continue; // legacy or unreadable: nothing to clear
+		}
+		if (record.diff) {
+			clearChanges(record);
+			await vscode.workspace.fs.writeFile(recordUri, new TextEncoder().encode(JSON.stringify(record, undefined, '\t') + '\n'));
+		}
+	}
 }
 
 /**
