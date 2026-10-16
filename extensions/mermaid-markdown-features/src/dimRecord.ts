@@ -7,7 +7,7 @@
  * One diagram parsed from a `.dim` record: the mermaid source to render and a
  * short label for the viewer's toggle button.
  *
- * This mirrors `IDimDiagram` and `parseDimRecord` in
+ * This mirrors `IDimDiagram`, `parseDimRecord` and `parseDimReadme` in
  * `src/vs/platform/agentHost/common/dimHookStorage.ts`; the extension cannot
  * import platform sources, so the small JSON shape is duplicated here. Keep the
  * two in sync.
@@ -56,15 +56,15 @@ export function parseDimRecord(content: string): IDimDiagramView[] {
 		try {
 			const parsed = JSON.parse(content) as { diagrams?: Array<{ type?: string; label?: string; mermaid?: string }> };
 			if (parsed && Array.isArray(parsed.diagrams)) {
-				const diagrams = parsed.diagrams
+				// A valid JSON record: its diagrams are authoritative, even when empty (a
+				// seeded or overview-only record has none). Only a non-JSON legacy record
+				// falls through to being treated as a single block of raw mermaid below.
+				return parsed.diagrams
 					.filter((d): d is { type?: string; label?: string; mermaid: string } => !!d && typeof d.mermaid === 'string')
 					.map(d => {
 						const type = d.type ?? inferType(d.mermaid);
 						return { type, label: d.label || labelForType(type), mermaid: d.mermaid };
 					});
-				if (diagrams.length > 0) {
-					return diagrams;
-				}
 			}
 		} catch {
 			// Not valid JSON; fall through and treat the whole file as raw mermaid.
@@ -72,4 +72,25 @@ export function parseDimRecord(content: string): IDimDiagramView[] {
 	}
 	const type = inferType(content);
 	return [{ type, label: labelForType(type), mermaid: content }];
+}
+
+/**
+ * Extracts the `readme` overview stored in a `.dim` record's JSON container, or
+ * `undefined` when the record has none yet (a freshly seeded or legacy record, or
+ * one whose generation has not produced an overview). Lets the viewer show the
+ * overview in its always-available "README" view.
+ *
+ * @param content The raw text of the `.dim` file.
+ */
+export function parseDimReadme(content: string): string | undefined {
+	const trimmed = content.trimStart();
+	if (!trimmed.startsWith('{')) {
+		return undefined;
+	}
+	try {
+		const parsed = JSON.parse(content) as { readme?: unknown };
+		return typeof parsed.readme === 'string' && parsed.readme.length > 0 ? parsed.readme : undefined;
+	} catch {
+		return undefined;
+	}
 }

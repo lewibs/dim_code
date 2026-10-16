@@ -4,12 +4,19 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import { getMermaidEditorHtml } from './editorManager';
-import { IDimDiagramView, parseDimRecord } from './dimRecord';
+import { parseDimReadme, parseDimRecord } from './dimRecord';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
 import { MermaidWebviewManager } from './webviewManager';
 
 export const dimEditorViewType = 'vscode.mermaid-markdown-features.dimEditor';
+
+/**
+ * View type tag of the always-present README view, which shows a plain-English
+ * overview of the source file. Duplicated as the `readme` id the workbench Dim
+ * toggle sends via {@link showDiagramCommand}; keep the two in sync.
+ */
+const readmeViewType = 'readme';
 
 /**
  * Command the native Dim view toggle (in the workbench editor title bar) runs to
@@ -27,12 +34,20 @@ const showDiagramCommand = '_dim.showDiagram';
  */
 const resolveRecordCommand = '_dim.resolveRecord';
 
-/** An open Dim diagram view: its panel, the record it reads, and the diagram shown. */
+/** One switchable view in the editor: the README overview (`text`) or a diagram (`mermaid`). */
+interface IDimViewEntry {
+	readonly type: string;
+	readonly label: string;
+	readonly mermaid?: string;
+	readonly text?: string;
+}
+
+/** An open Dim editor: its panel, the record it reads, its views and the one shown. */
 interface IDimView {
 	readonly panel: vscode.WebviewPanel;
 	readonly recordUri: vscode.Uri | undefined;
 	readonly render: () => Promise<void>;
-	diagrams: readonly IDimDiagramView[];
+	views: readonly IDimViewEntry[];
 	index: number;
 }
 
@@ -90,18 +105,18 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		const view: IDimView = {
 			panel: webviewPanel,
 			recordUri,
-			diagrams: [],
+			views: [],
 			index: 0,
 			render: async () => {
-				view.diagrams = recordUri ? await loadDiagrams(recordUri) : [];
+				view.views = recordUri ? await loadViews(recordUri) : [buildReadmeView(undefined)];
 				// Show the type last selected for this source file (restored across hide/show
-				// and preserved across live re-renders); otherwise keep the current index.
+				// and preserved across live re-renders); otherwise default to the first diagram
+				// if the record has one, else the always-present README overview.
 				const selectedType = this._selected.get(key);
-				const selectedIndex = selectedType ? view.diagrams.findIndex(d => d.type === selectedType) : -1;
-				view.index = selectedIndex >= 0
-					? selectedIndex
-					: (view.diagrams.length > 0 ? Math.max(0, Math.min(view.index, view.diagrams.length - 1)) : 0);
-				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.diagrams, diagramId, view.index);
+				const selectedIndex = selectedType ? view.views.findIndex(v => v.type === selectedType) : -1;
+				const defaultIndex = view.views.length > 1 ? 1 : 0;
+				view.index = selectedIndex >= 0 ? selectedIndex : defaultIndex;
+				webviewPanel.webview.html = getMermaidEditorHtml(webviewPanel.webview, this._extensionUri, view.views, diagramId, view.index);
 			}
 		};
 		this._views.set(key, view);
@@ -152,19 +167,39 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		this._selected.set(uri, type);
 		const view = this._views.get(uri);
 		if (view) {
-			const index = view.diagrams.findIndex(d => d.type === type);
+			const index = view.views.findIndex(v => v.type === type);
 			view.index = index >= 0 ? index : 0;
 			view.panel.webview.postMessage({ type: 'dimSelectDiagram', index: view.index });
 		}
 	}
 }
 
-/** Reads and parses a `.dim` record, or `[]` when it is missing or unreadable. */
-async function loadDiagrams(recordUri: vscode.Uri): Promise<IDimDiagramView[]> {
+/**
+ * Builds the always-present README view from a record's stored overview, falling
+ * back to a "being generated" message when the record has none yet (freshly seeded,
+ * or generation has not produced an overview).
+ */
+function buildReadmeView(readme: string | undefined): IDimViewEntry {
+	const text = readme && readme.length > 0
+		? readme
+		: vscode.l10n.t("The overview for this file is still being generated…");
+	return { type: readmeViewType, label: vscode.l10n.t('README'), text };
+}
+
+/**
+ * Reads a `.dim` record into the list of views the editor can switch between: the
+ * README overview first (always present), then one view per diagram the record
+ * holds. Returns just the README (with its default message) when the record is
+ * missing or unreadable.
+ */
+async function loadViews(recordUri: vscode.Uri): Promise<IDimViewEntry[]> {
+	let content: string | undefined;
 	try {
-		const bytes = await vscode.workspace.fs.readFile(recordUri);
-		return parseDimRecord(new TextDecoder().decode(bytes));
+		content = new TextDecoder().decode(await vscode.workspace.fs.readFile(recordUri));
 	} catch {
-		return [];
+		content = undefined;
 	}
+	const readme = content !== undefined ? parseDimReadme(content) : undefined;
+	const diagrams = content !== undefined ? parseDimRecord(content) : [];
+	return [buildReadmeView(readme), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid }))];
 }

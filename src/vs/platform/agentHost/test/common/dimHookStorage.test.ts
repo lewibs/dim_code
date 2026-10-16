@@ -12,7 +12,7 @@ import { FileService } from '../../../files/common/fileService.js';
 import { IFileService } from '../../../files/common/files.js';
 import { InMemoryFileSystemProvider } from '../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, parseDimRecord, seedDimRecord, serializeDimRecord, isDimCodeFile } from '../../common/dimHookStorage.js';
+import { dimHookRecordUri, dimHookStorageDir, dimSourceFromRecordUri, seedDimRecord, serializeDimRecord, isDimCodeFile } from '../../common/dimHookStorage.js';
 import { DimDiagramType } from '../../common/dimDiagramTypes.js';
 
 suite('dimHookStorage', () => {
@@ -88,17 +88,19 @@ suite('dimHookStorage', () => {
 			disposables.add(fileService.registerProvider('file', disposables.add(new InMemoryFileSystemProvider())));
 		});
 
-		test('creates a placeholder record for a source file, carrying its relative source path', async () => {
+		test('creates an empty record for a source file, carrying its relative source path', async () => {
 			const file = URI.file('/home/u/project/src/a.ts');
 			const record = await seedDimRecord(fileService, storageHome, folder, file);
 			const content = record && (await fileService.readFile(record)).value.toString();
 
+			// No placeholder or default diagram is seeded: the file shows as raw source
+			// until the generator writes a diagram chosen from its code.
 			assert.deepStrictEqual({
 				record: record?.toString(),
-				hasDiagrams: content ? parseDimRecord(content).length > 0 : false,
+				content,
 			}, {
 				record: dimHookRecordUri(storageHome, folder, file)!.toString(),
-				hasDiagrams: true,
+				content: serializeDimRecord([], 'src/a.ts'),
 			});
 		});
 

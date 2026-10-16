@@ -68,7 +68,9 @@ echo "$changed" | while IFS= read -r line; do
 		*) continue ;;
 	esac
 
-	# Delegate to the shared generator, which picks the best-fit diagram type for
-	# this file's code and (re)writes the record only when the source has changed.
-	"$generator" "$root/$path" "$DIM_DIM_DIR/$path.dim" "$path"
+	# Delegate to the shared generator, which picks the diagrams for this file's code
+	# and (re)writes the record only when the source has changed. Invoked via `sh` (as
+	# this hook itself is launched) so it runs even when the copied script, written
+	# without an executable bit, is not marked executable.
+	sh "$generator" "$root/$path" "$DIM_DIM_DIR/$path.dim" "$path"
 done

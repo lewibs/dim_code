@@ -56,11 +56,19 @@ export interface IDimRecord {
 	/**
 	 * Content hash of the source file at the time the diagrams were generated, used
 	 * by the `generateDimDiagram.sh` generator to skip a file whose code is unchanged.
-	 * Written only by that generator (the editor's placeholder seed omits it, so a
-	 * seeded record is always treated as stale and regenerated). Optional so seeded and
+	 * Written only by that generator (the editor's empty seed omits it, so a seeded
+	 * record is always treated as stale and regenerated). Optional so seeded and
 	 * legacy records keep parsing.
 	 */
 	readonly sourceHash?: string;
+	/**
+	 * A short, plain-English overview of what the source file does, shown in the
+	 * viewer's always-available "README" view. Written by the generator alongside the
+	 * diagrams; omitted on a freshly seeded or failed record, in which case the viewer
+	 * shows a "being generated" placeholder message instead. Optional so seeded and
+	 * legacy records keep parsing.
+	 */
+	readonly readme?: string;
 	readonly diagrams: readonly IDimDiagram[];
 }
 
@@ -132,51 +140,13 @@ export function parseDimRecordSource(content: string): string | undefined {
  * @param diagrams The diagrams to store.
  * @param source Workspace-relative path of the source file the record describes,
  * recorded so the viewer can offer a "Raw" view of it. Omitted when unknown.
+ * @param readme A short overview of the file for the viewer's README view. Omitted
+ * when none has been generated yet (`JSON.stringify` drops the undefined field).
  */
-export function serializeDimRecord(diagrams: readonly IDimDiagram[], source?: string): string {
-	const record: IDimRecord = { version: DIM_RECORD_VERSION, source, diagrams };
+export function serializeDimRecord(diagrams: readonly IDimDiagram[], source?: string, readme?: string): string {
+	const record: IDimRecord = { version: DIM_RECORD_VERSION, source, readme, diagrams };
 	return JSON.stringify(record, undefined, '\t');
 }
-
-/**
- * Placeholder diagrams seeded into a freshly created `.dim` record until the agent
- * fills them in: a structural view and a behavioral view, so the viewer shows its
- * toggle group out of the box. Mirrored by the `updateDimHook.sh` agent hook;
- * keep the two in sync.
- */
-export const dimPlaceholderDiagrams: readonly IDimDiagram[] = [
-	{
-		type: DimDiagramType.Class,
-		label: dimDiagramLabel(DimDiagramType.Class),
-		mermaid: `classDiagram
-	class Example {
-		+String name
-		+doWork() void
-	}
-	class Helper {
-		+assist() void
-	}
-	Example --> Helper : uses
-`,
-	},
-	{
-		type: DimDiagramType.Sequence,
-		label: dimDiagramLabel(DimDiagramType.Sequence),
-		mermaid: `sequenceDiagram
-	participant Example
-	participant Helper
-	Example->>Helper: assist()
-	Helper-->>Example: result
-`,
-	},
-];
-
-/**
- * The serialized {@link IDimRecord} text seeded into a freshly created `.dim`
- * record. Written by the editor when it redirects a file open to a missing
- * record; mirrored by the `updateDimHook.sh` agent hook.
- */
-export const dimPlaceholderRecordContent = serializeDimRecord(dimPlaceholderDiagrams);
 
 /**
  * Whether a file is a source-code file that Dim should give a `.dim` change
@@ -288,11 +258,13 @@ export async function seedDimRecord(fileService: IFileService, workspaceStorageH
 		return undefined; // the file is outside the workspace folder
 	}
 	if (!(await fileService.exists(record))) {
-		// Record the file's workspace-relative path so the viewer can map the record
-		// back to its source file (and offer a "Raw" view of it).
+		// Seed an empty record (no diagrams): the file shows as raw source until the
+		// generator fills in a diagram chosen from its actual code, so no placeholder or
+		// default diagram is ever shown. The workspace-relative path is recorded so the
+		// viewer can map the record back to its source file (and offer a "Raw" view of it).
 		const source = relativePath(workspaceFolder, file);
 		try {
-			await fileService.createFile(record, VSBuffer.fromString(serializeDimRecord(dimPlaceholderDiagrams, source)));
+			await fileService.createFile(record, VSBuffer.fromString(serializeDimRecord([], source)));
 		} catch {
 			// A concurrent seed may have created it first; the record now exists either way.
 		}

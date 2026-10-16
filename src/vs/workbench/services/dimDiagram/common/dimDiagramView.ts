@@ -43,7 +43,7 @@ export function findReusableDimEditor(target: EditorInput, groupEditors: readonl
  * the same way Markdown offers its text/preview pair.
  */
 export interface IDimDiagramViewOption {
-	/** Stable id of the view: a `DimDiagramType` tag, or `raw`. */
+	/** Stable id of the view: a `DimDiagramType` tag, `raw`, or `readme` (the overview). */
 	readonly id: string;
 	/** Localized label shown in the picker (e.g. "Structure", "Raw"). */
 	readonly label: string;

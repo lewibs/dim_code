@@ -77,8 +77,8 @@ export const dimDiagramCatalog: { readonly [type in DimDiagramType]: IDimDiagram
 	[DimDiagramType.State]: {
 		label: "States",
 		summary: "The modes a component moves through and the transitions between them.",
-		appliesTo: ['class', 'service', 'component'],
-		useWhen: "Code models a lifecycle or state machine (a picker, a connection, a session).",
+		appliesTo: ['class', 'service', 'component', 'parameter', 'field', 'property'],
+		useWhen: "Code models a lifecycle or state machine (a picker, a connection, a session), or an individual class parameter/field whose value moves through a fixed set of modes.",
 		dimension: 'behavior',
 	},
 	[DimDiagramType.Entity]: {

@@ -8,9 +8,20 @@ import { MermaidWebviewManager } from './webviewManager';
 import { escapeHtmlText } from './util/html';
 import { Disposable } from './util/dispose';
 import { renderMermaidConfigSpan } from './markdownMermaid/config';
-import { IDimDiagramView } from './dimRecord';
 
 export const mermaidEditorViewType = 'vscode.mermaid-markdown-features.preview';
+
+/**
+ * One view embedded in the Dim editor webview: either a mermaid diagram (`mermaid`
+ * set) or the README overview (`text` set). The native Dim view toggle switches
+ * between them by index via a `dimSelectDiagram` message; the webview renders a
+ * `text` view as plain prose and a `mermaid` view as a rendered diagram.
+ */
+export interface IDimWebviewView {
+	readonly label: string;
+	readonly mermaid?: string;
+	readonly text?: string;
+}
 
 interface MermaidPreviewState {
 	readonly webviewId: string;
@@ -204,26 +215,27 @@ class MermaidPreview extends Disposable {
 	}
 
 	private _getHtml(): string {
-		const diagrams: IDimDiagramView[] = [{ type: '', label: '', mermaid: this._mermaidSource }];
-		return getMermaidEditorHtml(this._webviewPanel.webview, this._extensionUri, diagrams, this.diagramId);
+		const views: IDimWebviewView[] = [{ label: '', mermaid: this._mermaidSource }];
+		return getMermaidEditorHtml(this._webviewPanel.webview, this._extensionUri, views, this.diagramId);
 	}
 }
 
 /**
  * Builds the full-viewport mermaid webview HTML shared by the diagram preview
- * panel and the `.dim` custom editor. The selected diagram's source is embedded in
- * the `.mermaid` element and rendered by the `index-editor` webview script, which
- * also wires up the pan/zoom controls. All of the record's diagrams are embedded as
- * JSON so the native Dim view toggle can switch between them in place (via a
- * `dimSelectDiagram` message) without reloading the webview.
+ * panel and the `.dim` custom editor. The selected view's content is embedded in
+ * the webview and rendered by the `index-editor` script, which also wires up the
+ * pan/zoom controls. A view is either a mermaid diagram or the README overview
+ * (plain prose). All of the record's views are embedded as JSON so the native Dim
+ * view toggle can switch between them in place (via a `dimSelectDiagram` message)
+ * without reloading the webview.
  *
  * @param webview The webview the HTML is rendered into (for resource URIs and CSP).
  * @param extensionUri The extension root, used to resolve the webview bundle.
- * @param diagrams The diagrams held by the record.
+ * @param views The views held by the record (README overview and/or diagrams).
  * @param diagramId The id used to address this webview for pan/zoom commands.
- * @param initialIndex The index of the diagram to show first (clamped to range).
+ * @param initialIndex The index of the view to show first (clamped to range).
  */
-export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, diagrams: readonly IDimDiagramView[], diagramId: string, initialIndex: number = 0): string {
+export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vscode.Uri, views: readonly IDimWebviewView[], diagramId: string, initialIndex: number = 0): string {
 	const nonce = generateUuid();
 
 	const mediaRoot = vscode.Uri.joinPath(extensionUri, 'chat-webview-out');
@@ -234,15 +246,19 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 	const zoomInLabel = vscode.l10n.t('Zoom In');
 	const resetPanZoomLabel = vscode.l10n.t('Reset Pan and Zoom');
 
-	const index = diagrams.length > 0 ? Math.max(0, Math.min(initialIndex, diagrams.length - 1)) : 0;
-	const mermaidSource = diagrams[index]?.mermaid ?? '';
+	const index = views.length > 0 ? Math.max(0, Math.min(initialIndex, views.length - 1)) : 0;
+	const initial = views[index];
+	// A README view carries `text`; a diagram view carries `mermaid`. The initial
+	// render shows one or the other; the client swaps between them on toggle.
+	const initialIsReadme = initial?.text !== undefined;
+	const mermaidSource = initialIsReadme ? '' : (initial?.mermaid ?? '');
+	const readmeText = initialIsReadme ? (initial?.text ?? '') : '';
 
-	// All diagram sources, embedded as JSON data so the native toggle can swap the
-	// rendered diagram in place. `type="application/json"` is a data block (not
-	// executed), and `<`/`>`/`&` are escaped so the payload cannot break out of the
-	// script element.
-	const diagramData = diagrams.length > 0
-		? `<script type="application/json" id="dim-diagrams" nonce="${nonce}">${JSON.stringify(diagrams.map(d => ({ label: d.label, mermaid: d.mermaid }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
+	// All views, embedded as JSON data so the native toggle can swap the shown view
+	// in place. `type="application/json"` is a data block (not executed), and
+	// `<`/`>`/`&` are escaped so the payload cannot break out of the script element.
+	const viewData = views.length > 0
+		? `<script type="application/json" id="dim-views" nonce="${nonce}">${JSON.stringify(views.map(v => ({ label: v.label, mermaid: v.mermaid, text: v.text }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
 		: '';
 
 	return /* html */`<!DOCTYPE html>
@@ -270,6 +286,21 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				.mermaid-wrapper {
 					height: 100%;
 					width: 100%;
+				}
+				.dim-readme {
+					box-sizing: border-box;
+					height: 100%;
+					width: 100%;
+					overflow: auto;
+					padding: 24px 32px;
+					max-width: 720px;
+					margin: 0 auto;
+					white-space: pre-wrap;
+					word-break: break-word;
+					line-height: 1.6;
+					font-family: var(--vscode-font-family);
+					font-size: var(--vscode-font-size);
+					color: var(--vscode-foreground);
 				}
 				.zoom-controls {
 					position: absolute;
@@ -306,8 +337,8 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 		</head>
 		<body data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
 			${renderMermaidConfigSpan()}
-			${diagramData}
-			<div class="zoom-controls">
+			${viewData}
+			<div class="zoom-controls"${initialIsReadme ? ' style="display: none;"' : ''}>
 				<button class="pan-mode-btn" title="${togglePanModeLabel}" aria-label="${togglePanModeLabel}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i></button>
 				<button class="zoom-out-btn" title="${zoomOutLabel}" aria-label="${zoomOutLabel}"><i class="codicon codicon-zoom-out" aria-hidden="true"></i></button>
 				<button class="zoom-in-btn" title="${zoomInLabel}" aria-label="${zoomInLabel}"><i class="codicon codicon-zoom-in" aria-hidden="true"></i></button>
@@ -316,6 +347,7 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 			<pre class="mermaid">
 				${escapeHtmlText(mermaidSource)}
 			</pre>
+			<div class="dim-readme"${initialIsReadme ? '' : ' style="display: none;"'}>${escapeHtmlText(readmeText)}</div>
 			<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
 		</html>`;

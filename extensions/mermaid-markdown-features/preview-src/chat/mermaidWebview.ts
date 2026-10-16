@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import mermaid, { MermaidConfig } from 'mermaid';
+import mermaid from 'mermaid';
 import { buildMermaidConfig, createMermaidErrorElement, loadExtensionConfig, markVsCodeContextAsError } from '../shared';
 import { VsCodeMermaidThemeTracker } from '../shared/vsCodeTheme';
 import { VsCodeApi } from './vscodeApi';
@@ -408,13 +408,14 @@ async function rerenderMermaidDiagram(
 }
 
 /**
- * Reads the record's diagrams from the `#dim-diagrams` JSON data block embedded in
- * the webview HTML. The native Dim view toggle (in the editor title bar) switches
- * between these by index via a `dimSelectDiagram` message. Returns an empty array
- * when the block is absent or malformed.
+ * Reads the record's views from the `#dim-views` JSON data block embedded in the
+ * webview HTML. Each view is either a mermaid diagram (`mermaid` set) or the README
+ * overview (`text` set). The native Dim view toggle (in the editor title bar)
+ * switches between these by index via a `dimSelectDiagram` message. Returns an empty
+ * array when the block is absent or malformed.
  */
-function readDimDiagrams(): Array<{ mermaid: string }> {
-	const dataElement = document.getElementById('dim-diagrams');
+function readDimViews(): Array<{ mermaid?: string; text?: string }> {
+	const dataElement = document.getElementById('dim-views');
 	if (!dataElement) {
 		return [];
 	}
@@ -446,6 +447,14 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 		mermaidSource: diagramText
 	});
 
+	// The README overview view (plain prose) lives beside the diagram and the zoom
+	// controls; the Dim toggle swaps between showing the README and a diagram.
+	const readmeEl = document.querySelector<HTMLElement>('.dim-readme');
+	const zoomControls = Array.from(document.querySelectorAll<HTMLElement>('.zoom-controls'));
+	// The HTML hides the README (inline `display: none`) when a diagram shows first,
+	// and hides the zoom controls when the README shows first.
+	const startsOnReadme = !!readmeEl && readmeEl.style.display !== 'none';
+
 	// Wrap the diagram for pan/zoom support
 	const wrapper = document.createElement('div');
 	wrapper.className = 'mermaid-wrapper';
@@ -459,26 +468,33 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	content.appendChild(diagram);
 	wrapper.appendChild(content);
 
-	// Run mermaid using the selected VS Code-themed config
-	const config: MermaidConfig = buildMermaidConfig(loadExtensionConfig(), themeTracker);
-	mermaid.initialize(config);
-	try {
-		await mermaid.run({ nodes: [diagram] });
-	} catch (err) {
-		diagram.replaceChildren(createMermaidErrorElement(err));
-		markVsCodeContextAsError(document.body);
-		for (const el of document.querySelectorAll<HTMLElement>('.zoom-controls')) {
-			el.style.display = 'none';
-		}
-		diagram.classList.add('rendered');
-		return;
-	}
+	mermaid.initialize(buildMermaidConfig(loadExtensionConfig(), themeTracker));
 
-	// Show the diagram now that it's rendered
-	diagram.classList.add('rendered');
+	// Only render the diagram up front when a diagram shows first; when the README
+	// shows first the `.mermaid` element is empty and running mermaid on it would
+	// error, so defer the first render until a diagram view is selected.
+	if (!startsOnReadme) {
+		try {
+			await mermaid.run({ nodes: [diagram] });
+		} catch (err) {
+			diagram.replaceChildren(createMermaidErrorElement(err));
+			markVsCodeContextAsError(document.body);
+			for (const el of zoomControls) {
+				el.style.display = 'none';
+			}
+			diagram.classList.add('rendered');
+			return;
+		}
+		// Show the diagram now that it's rendered
+		diagram.classList.add('rendered');
+	}
 
 	const panZoomHandler = new PanZoomHandler(wrapper, content, vscode, options);
 	panZoomHandler.initialize();
+
+	if (startsOnReadme) {
+		wrapper.style.display = 'none';
+	}
 
 	// Serialize re-renders. `mermaid.run` mutates the diagram node in place and is
 	// not safe to run concurrently, so overlapping requests — rapid toggle clicks,
@@ -505,15 +521,40 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 			panZoomHandler.reset();
 			return;
 		}
-		// The native Dim view toggle asks to show a different diagram from the
-		// record: swap the rendered mermaid source in place and reset pan/zoom.
+		// The native Dim view toggle asks to show a different view from the record:
+		// either the README overview (plain prose) or a diagram (swapped in place).
 		if (message.type === 'dimSelectDiagram') {
-			const selected = readDimDiagrams()[message.index];
-			if (!selected || typeof selected.mermaid !== 'string') {
+			const selected = readDimViews()[message.index];
+			if (!selected) {
 				return;
+			}
+			if (typeof selected.text === 'string') {
+				// Show the README overview and hide the diagram surface and its controls.
+				if (readmeEl) {
+					readmeEl.textContent = selected.text;
+					readmeEl.style.display = '';
+				}
+				wrapper.style.display = 'none';
+				for (const el of zoomControls) {
+					el.style.display = 'none';
+				}
+				return;
+			}
+			if (typeof selected.mermaid !== 'string') {
+				return;
+			}
+			// Show a diagram: reveal the diagram surface (hidden while the README showed)
+			// and render the new source in place.
+			if (readmeEl) {
+				readmeEl.style.display = 'none';
+			}
+			wrapper.style.display = '';
+			for (const el of zoomControls) {
+				el.style.display = '';
 			}
 			state.mermaidSource = selected.mermaid;
 			await requestRender(selected.mermaid);
+			diagram.classList.add('rendered');
 			// Only reset the view if this is still the diagram that is showing, so a
 			// superseded switch does not clobber the latest selection's pan/zoom.
 			if (state.mermaidSource === selected.mermaid) {
@@ -527,7 +568,11 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	// from `workbench.colorCustomizations`), and only fires when the resolved colors actually
 	// change.
 	themeTracker.onDidChange(() => {
-		requestRender(state.mermaidSource);
+		// Only re-render when a diagram is actually showing; the README view has no
+		// mermaid source to re-render.
+		if (wrapper.style.display !== 'none') {
+			requestRender(state.mermaidSource);
+		}
 	});
 	themeTracker.observeDomChanges();
 
