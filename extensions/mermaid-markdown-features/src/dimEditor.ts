@@ -388,5 +388,6 @@ async function loadViews(recordUri: vscode.Uri): Promise<IDimViewEntry[]> {
 	const tests = content !== undefined ? parseDimTests(content) : undefined;
 	const diagrams = content !== undefined ? parseDimRecord(content) : [];
 	const isNew = content !== undefined && !!parseDimDiff(content)?.isNew;
-	return [buildReadmeView(readme, tests), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid, links: d.links, changes: d.changes, isNew }))];
+	// A new file is wholly added, its tests included, as its diagrams are.
+	return [buildReadmeView(readme, isNew ? tests?.map(test => ({ ...test, change: 'added' as const })) : tests), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid, links: d.links, changes: d.changes, isNew }))];
 }

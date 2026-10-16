@@ -99,6 +99,7 @@ export class ChatEditingCodeEditorIntegration implements IModifiedFileEntryEdito
 		private readonly _editor: ICodeEditor,
 		documentDiffInfo: IObservable<IDocumentDiff2>,
 		renderDiffImmediately: boolean,
+		private readonly _renderHunkWidgets: boolean,
 		@IEditorService private readonly _editorService: IEditorService,
 		@IAccessibilitySignalService private readonly _accessibilitySignalsService: IAccessibilitySignalService,
 		@IContextKeyService contextKeyService: IContextKeyService,
@@ -441,24 +442,26 @@ export class ChatEditingCodeEditorIntegration implements IModifiedFileEntryEdito
 
 				if (reviewMode || diffMode) {
 
-					// Add content widget for each diff change
-					let widget = this._diffHunkWidgetPool.get();
-					if (!widget) {
-						// make a new one
-						widget = this._editor.invokeWithinContext(accessor => {
-							const instaService = accessor.get(IInstantiationService);
-							return instaService.createInstance(DiffHunkWidget, this._editor, diff, diffEntry, this._editor.getModel()!.getVersionId(), isCreatedContent ? 0 : extraLines);
-						});
-					} else {
-						widget.update(diff, diffEntry, this._editor.getModel()!.getVersionId(), isCreatedContent ? 0 : extraLines);
+					if (this._renderHunkWidgets) {
+						// Add content widget for each diff change
+						let widget = this._diffHunkWidgetPool.get();
+						if (!widget) {
+							// make a new one
+							widget = this._editor.invokeWithinContext(accessor => {
+								const instaService = accessor.get(IInstantiationService);
+								return instaService.createInstance(DiffHunkWidget, this._editor, diff, diffEntry, this._editor.getModel()!.getVersionId(), isCreatedContent ? 0 : extraLines);
+							});
+						} else {
+							widget.update(diff, diffEntry, this._editor.getModel()!.getVersionId(), isCreatedContent ? 0 : extraLines);
+						}
+						this._diffHunksRenderStore.add(toDisposable(() => {
+							this._diffHunkWidgetPool.putBack(widget);
+						}));
+
+						widget.layout(diffEntry.modified.startLineNumber);
+
+						this._diffHunkWidgets.push(widget);
 					}
-					this._diffHunksRenderStore.add(toDisposable(() => {
-						this._diffHunkWidgetPool.putBack(widget);
-					}));
-
-					widget.layout(diffEntry.modified.startLineNumber);
-
-					this._diffHunkWidgets.push(widget);
 					diffHunkDecorations.push({
 						range: diffEntry.modified.toInclusiveRange() ?? new Range(diffEntry.modified.startLineNumber, 1, diffEntry.modified.startLineNumber, Number.MAX_SAFE_INTEGER),
 						options: {

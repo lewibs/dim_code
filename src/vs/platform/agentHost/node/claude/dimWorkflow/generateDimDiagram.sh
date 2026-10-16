@@ -148,6 +148,8 @@ fi
 # Likewise a record must show changes exactly when the file has them: one drawn before
 # the file was edited (e.g. from before changes were shown) is regenerated to mark them.
 # A record whose changes were committed since is reset by the editor, not regenerated.
+# A changed test file's record must also mark its tests (its diff stamp says "tests": true);
+# one drawn before tests were marked is regenerated once to mark them.
 if [ -f "$OUT" ]; then
 	existingHash=$(sed -n 's/.*"sourceHash"[[:space:]]*:[[:space:]]*"\([0-9a-zA-Z]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n1)
 	hasDiff=0
@@ -159,7 +161,11 @@ if [ -f "$OUT" ]; then
 	existingPending=$(sed -n 's/.*"pending"[[:space:]]*:[[:space:]]*"\([0-9a-zA-Z]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n1)
 	[ "$wantsDiff" = 1 ] || pendingHash=""
 	if [ -n "$existingHash" ] && [ "$existingHash" = "$srcHash" ] && [ "$hasDiff" = "$wantsDiff" ] && [ "$existingPending" = "$pendingHash" ]; then
-		if [ "$isTestFile" = 0 ] || grep -q '"tests"[[:space:]]*:' "$OUT" 2>/dev/null; then
+		testsMarked=1
+		if [ "$isTestFile" = 1 ] && [ "$diffState" = changed ] && ! tr -d '\n' < "$OUT" 2>/dev/null | grep -q '"diff"[[:space:]]*:[[:space:]]*{[^}]*"tests"[[:space:]]*:[[:space:]]*true'; then
+			testsMarked=0
+		fi
+		if [ "$testsMarked" = 1 ] && { [ "$isTestFile" = 0 ] || grep -q '"tests"[[:space:]]*:' "$OUT" 2>/dev/null; }; then
 			echo "generateDimDiagram: $REL unchanged; keeping existing record."
 			exit 0
 		fi
@@ -384,6 +390,12 @@ $diffText
 --- END DIFF ---
 "
 		changesShape=',"changes":[{"label":"Foo.bar","change":"added"}]'
+		if [ "$isTestFile" = 1 ]; then
+			changesBlock="$changesBlock
+Also mark the tests the diff touched: give each such entry of \"tests\" a \"change\" field: \"added\" (a new test), \"changed\" (its name, setup, input or assertions changed) or \"removed\" (it is gone from the current code). Keep each removed test listed, described as it was before the change, at its old place in the order. Leave \"change\" out of tests the diff did not touch.
+"
+			testsShape=',"tests":[{"suite":"...","name":"...","checks":"...","input":"...","expected":"...","mocks":["..."],"change":"added"}]'
+		fi
 		;;
 	new)
 		changesBlock="
@@ -470,7 +482,12 @@ diffField=""
 diffBase="\"base\": \"$baseSha\""
 [ -n "$pendingHash" ] && diffBase="\"pending\": \"$pendingHash\""
 case "$diffState" in
-	changed) diffField=" \"diff\": {$diffBase, \"new\": false}," ;;
+	changed)
+		# A test file's stamp also says its tests are marked (see the freshness check above).
+		diffTests=""
+		[ "$isTestFile" = 1 ] && diffTests=", \"tests\": true"
+		diffField=" \"diff\": {$diffBase, \"new\": false$diffTests},"
+		;;
 	new) diffField=" \"diff\": {$diffBase, \"new\": true}," ;;
 esac
 tmp="$OUT.tmp.$$"

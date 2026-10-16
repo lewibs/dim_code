@@ -37,6 +37,7 @@ interface IDimRecordJson {
 	sourceHash?: unknown;
 	diff?: { base?: unknown; pending?: unknown; new?: unknown };
 	diagrams?: Array<{ mermaid?: unknown; changes?: unknown; links?: unknown } | null>;
+	tests?: Array<{ change?: unknown } | null>;
 }
 
 /** The result of one git run: its exit code (`undefined` when git could not run) and output. */
@@ -175,11 +176,18 @@ export async function clearFileChanges(file: vscode.Uri): Promise<void> {
 
 /**
  * Drops a record's change marks: its `diff` stamp, each diagram's `changes` list, the
- * removed elements (the lines between {@link removedStart} and {@link removedEnd}) and
- * the links to those removed elements.
+ * removed elements (the lines between {@link removedStart} and {@link removedEnd}), the
+ * links to those removed elements, and the marks of a test file's tests along with its
+ * removed tests.
  */
 function clearChanges(record: IDimRecordJson): void {
 	delete record.diff;
+	if (Array.isArray(record.tests)) {
+		record.tests = record.tests.filter(test => test?.change !== 'removed');
+		for (const test of record.tests) {
+			delete test?.change;
+		}
+	}
 	for (const diagram of record.diagrams ?? []) {
 		if (!diagram) {
 			continue;

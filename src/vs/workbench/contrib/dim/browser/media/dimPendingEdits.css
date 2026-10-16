@@ -1,0 +1,25 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Mirrors `.dim-review` in the Dim diagram viewer (extensions/mermaid-markdown-features/src/editorManager.ts). */
+.monaco-editor .dim-review-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 4px 4px 4px 12px;
+	background-color: var(--vscode-editorWidget-background);
+	color: var(--vscode-foreground);
+	border: 1px solid var(--vscode-editorWidget-border);
+	border-radius: 6px;
+	box-shadow: var(--vscode-shadow-md);
+	white-space: nowrap;
+	z-index: 10;
+}
+
+.monaco-editor .dim-review-bar .monaco-button {
+	width: auto;
+	padding: 3px 8px;
+	border-radius: 4px;
+}

@@ -28,10 +28,10 @@ export interface IDimHookContext {
 }
 
 /**
- * Build the unconditional Dim `Stop` hook matcher. Fires the bundled
- * {@link dimHookScriptPath} shell script once when a Claude session finishes a
- * turn, so it can record a `.dim` change record for each file updated during
- * the turn, and routes the script's output to {@link log} so it is visible in
+ * Build the unconditional Dim `Stop` hook matcher. Starts the bundled
+ * {@link dimHookScriptPath} shell script in the background (without waiting for
+ * it) once when a Claude session finishes a turn, so it can record a `.dim`
+ * change record for each file updated during the turn, and routes the script's output to {@link log} so it is visible in
  * the Dim Claude log channel. Baked into {@link buildOptions} so it applies in
  * every Dim build regardless of the opened workspace.
  */
@@ -39,14 +39,13 @@ export function dimDefaultHookGroup(log: (data: string) => void, context: IDimHo
 	const scriptPath = dimHookScriptPath();
 	return {
 		hooks: [async () => {
-			await new Promise<void>(resolve => {
-				const env = context.dimStorageDir ? { ...process.env, DIM_DIM_DIR: context.dimStorageDir } : process.env;
-				const child = spawn('/bin/sh', [scriptPath], { cwd: context.workspaceDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
-				child.stdout?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));
-				child.stderr?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));
-				child.on('close', () => resolve());
-				child.on('error', err => { log(`[Dim hook] failed: ${err.message}`); resolve(); });
-			});
+			// Diagram generation calls Claude per changed file and can take a while, so run it
+			// in the background instead of holding the turn open until it finishes.
+			const env = context.dimStorageDir ? { ...process.env, DIM_DIM_DIR: context.dimStorageDir } : process.env;
+			const child = spawn('/bin/sh', [scriptPath], { cwd: context.workspaceDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+			child.stdout?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));
+			child.stderr?.on('data', data => log(`[Dim hook] ${String(data).trimEnd()}`));
+			child.on('error', err => log(`[Dim hook] failed: ${err.message}`));
 			return {};
 		}],
 	};

@@ -222,6 +222,8 @@ export interface IDimTestCase {
 	readonly expected: string;
 	/** What the test replaces with a mock, stub, spy or fake; empty when it runs real code. */
 	readonly mocks: readonly string[];
+	/** How the file's changes waiting for review touched the test; unset when they did not. */
+	readonly change?: DimChangeKind;
 }
 
 /**
@@ -258,6 +260,7 @@ export function parseDimTests(content: string): IDimTestCase[] | undefined {
 			input: text(entry.input),
 			expected: text(entry.expected),
 			mocks,
+			change: dimChangeKinds.includes(entry.change as DimChangeKind) ? entry.change as DimChangeKind : undefined,
 		});
 	}
 	return tests;

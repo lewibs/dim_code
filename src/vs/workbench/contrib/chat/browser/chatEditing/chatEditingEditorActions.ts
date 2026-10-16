@@ -264,9 +264,7 @@ abstract class AcceptRejectHunkAction extends ChatEditingEditorAction {
 				},
 				menu: {
 					id: MenuId.ChatEditingEditorHunk,
-					order: 1,
-					// Dim's pending edits reuse the hunk widget with their own actions.
-					when: ctxHasEditorModification
+					order: 1
 				}
 			}
 		);
@@ -327,8 +325,7 @@ class ToggleDiffAction extends ChatEditingEditorAction {
 			},
 			menu: [{
 				id: MenuId.ChatEditingEditorHunk,
-				order: 10,
-				when: ctxHasEditorModification
+				order: 10
 			}, {
 				id: MenuId.ChatEditingEditorContent,
 				group: 'a_resolve',

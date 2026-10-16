@@ -210,23 +210,22 @@ class ClaudeTerminalViewPane extends ViewPane {
 			// when no folder is open.
 			const workspaceFolder = this._contextService.getWorkspace().folders.at(0)?.uri;
 			const dimStorageDir = workspaceFolder ? dimHookStorageDir(workspaceFolder).fsPath : undefined;
+			// Diagram generation calls Claude per changed file and can take a while, so the
+			// hook detaches it into the background (with its output closed, since the CLI waits
+			// for the hook's stdout/stderr to close) and returns immediately.
 			const hookCommand = dimStorageDir
-				? `DIM_DIM_DIR="${dimStorageDir}" sh "\${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"`
-				: 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh"';
-			// DISABLED (Dim): the Stop hook is off for now because each run can spend a
-			// Claude Haiku call per changed file; diagrams are still generated on file
-			// open. The scripts are still copied below, so set this to `true` to re-enable.
-			const stopHookEnabled = false;
+				? `DIM_DIM_DIR="${dimStorageDir}" nohup sh "\${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh" >/dev/null 2>&1 &`
+				: 'nohup sh "${CLAUDE_PLUGIN_ROOT}/hooks/updateDimHook.sh" >/dev/null 2>&1 &';
 			const hooks = {
 				description: 'Dim built-in hooks',
-				hooks: stopHookEnabled ? {
+				hooks: {
 					// Fire once when the agent finishes its turn (end of its response),
 					// rather than before every tool call.
 					Stop: [{
 						matcher: '',
 						hooks: [{ type: 'command', command: hookCommand }]
 					}]
-				} : {}
+				}
 			};
 			await this._fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
 			await this._fileService.writeFile(joinPath(hooksDir, 'hooks.json'), VSBuffer.fromString(JSON.stringify(hooks, null, '\t')));

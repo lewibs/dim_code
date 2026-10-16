@@ -416,6 +416,27 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 					border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
 					word-break: break-word;
 				}
+				/* A test the changes waiting for review touched, in its change's color (see .dim-change-*). */
+				.dim-tests tr.dim-test-change > td {
+					background: color-mix(in srgb, var(--dim-change) 14%, transparent);
+				}
+				.dim-tests tr.dim-test-change > td:first-child {
+					box-shadow: inset 3px 0 0 var(--dim-change);
+				}
+				.dim-tests tr.dim-change-removed > td {
+					color: var(--vscode-descriptionForeground);
+					text-decoration: line-through;
+				}
+				.dim-test-badge {
+					display: inline-block;
+					margin-right: 6px;
+					padding: 0 5px;
+					border: 1px solid var(--dim-change);
+					border-radius: 3px;
+					color: var(--dim-change);
+					font-size: 0.85em;
+					text-decoration: none;
+				}
 				.dim-tests th {
 					font-weight: 600;
 					color: var(--vscode-descriptionForeground);
@@ -685,17 +706,22 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 /**
  * Renders a test file's tests as a table (test, what it checks, input, expected
  * result, mocks) followed by a "Validation" summary of what the tests mock, so a
- * reader can tell at a glance how much of the real code the tests exercise.
+ * reader can tell at a glance how much of the real code the tests exercise. Tests
+ * the changes waiting for review touched are colored like changed diagram elements.
  */
 function renderTestsSection(tests: readonly IDimTestCase[]): string {
 	const heading = `<h2>${escapeHtmlText(vscode.l10n.t("Tests"))}</h2>`;
 	const noMocks = vscode.l10n.t("None");
+	const changeLabels = { added: vscode.l10n.t("Added"), changed: vscode.l10n.t("Changed"), removed: vscode.l10n.t("Removed") };
 	const rows = tests.map(test => {
 		const suite = test.suite ? `<span class="dim-tests-suite">${escapeHtmlText(test.suite)}</span>` : '';
 		const mocks = test.mocks.length > 0
 			? test.mocks.map(mock => `<code>${escapeHtmlText(mock)}</code>`).join(', ')
 			: `<span class="dim-tests-none">${escapeHtmlText(noMocks)}</span>`;
-		return `<tr><td>${suite}${escapeHtmlText(test.name)}</td><td>${escapeHtmlText(test.checks)}</td><td>${escapeHtmlText(test.input)}</td><td>${escapeHtmlText(test.expected)}</td><td>${mocks}</td></tr>`;
+		// The change is also spelled out, so it does not rest on color alone.
+		const badge = test.change ? `<span class="dim-test-badge">${escapeHtmlText(changeLabels[test.change])}</span>` : '';
+		const rowClass = test.change ? ` class="dim-test-change dim-change-${test.change}"` : '';
+		return `<tr${rowClass}><td>${badge}${suite}${escapeHtmlText(test.name)}</td><td>${escapeHtmlText(test.checks)}</td><td>${escapeHtmlText(test.input)}</td><td>${escapeHtmlText(test.expected)}</td><td>${mocks}</td></tr>`;
 	}).join('');
 	const header = [vscode.l10n.t("Test"), vscode.l10n.t("What It Checks"), vscode.l10n.t("Input"), vscode.l10n.t("Expected"), vscode.l10n.t("Mocked")]
 		.map(label => `<th scope="col">${escapeHtmlText(label)}</th>`).join('');
@@ -707,7 +733,9 @@ function renderTestsSection(tests: readonly IDimTestCase[]): string {
  * Summarizes what a test file's tests mock: each mocked dependency with how many
  * tests replace it, and how many tests run the real code throughout.
  */
-function renderValidation(tests: readonly IDimTestCase[]): string {
+function renderValidation(allTests: readonly IDimTestCase[]): string {
+	// Removed tests are listed in the table to show what went away, but no longer run.
+	const tests = allTests.filter(test => test.change !== 'removed');
 	const heading = `<h2>${escapeHtmlText(vscode.l10n.t("Validation"))}</h2>`;
 	const usage = new Map<string, number>();
 	for (const test of tests) {

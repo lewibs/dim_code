@@ -311,7 +311,7 @@ export class ChatEditingModifiedDocumentEntry extends AbstractChatEditingModifie
 
 		const diffInfo = this._textModelChangeService.diffInfo;
 
-		return this._instantiationService.createInstance(ChatEditingCodeEditorIntegration, this, codeEditor, diffInfo, false);
+		return this._instantiationService.createInstance(ChatEditingCodeEditorIntegration, this, codeEditor, diffInfo, false, true);
 	}
 
 	private _shouldAutoSave() {

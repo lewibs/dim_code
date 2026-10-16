@@ -24,11 +24,7 @@ import { McpServerType } from '../../../mcp/common/mcpPlatformTypes.js';
 import type { IMcpServerDefinition } from '../../../agentPlugins/common/pluginParsers.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { resolveMcpServerWorkingDirectory } from '../shared/mcpServerWorkingDirectory.js';
-// DISABLED (Dim): the built-in agent Stop hook is turned off for now to avoid a
-// Claude Haiku call on every finished turn. Diagram generation still happens on
-// file open (gated on the source content hash). Re-enable by restoring this import
-// and the `hooks.Stop = …` assignment below.
-// import { dimDefaultHookGroup } from './dimWorkflow/dimWorkflow.js';
+import { dimDefaultHookGroup } from './dimWorkflow/dimWorkflow.js';
 
 type ClaudeSdkDeniedMcpServerSpec = NonNullable<Settings['deniedMcpServers']>[number];
 
@@ -105,8 +101,8 @@ export interface IBuildOptionsInput {
 	readonly getUserPromptAdditionalContext?: () => string | undefined;
 	/**
 	 * Directory the bundled Dim `Stop` hook writes per-file `.dim` change
-	 * records under (see {@link dimDefaultHookGroup}). Resolved by the caller
-	 * from the workspace-storage root so the records stay out of the repo.
+	 * records under (see {@link dimDefaultHookGroup}): the workspace's `.dim`
+	 * records folder.
 	 * Omitted when no folder is open, in which case the hook records nothing.
 	 */
 	readonly dimHookStorageDir?: URI;
@@ -162,15 +158,12 @@ export async function buildOptions(
 		PATH: `${dirname(resolvedRgDiskPath)}${delimiter}${process.env.PATH ?? ''}`,
 	};
 	const hooks: NonNullable<Options['hooks']> = {};
-	// DISABLED (Dim): the built-in agent Stop hook ran the bundled workflow script
-	// once when the agent finished a turn, recording a `.dim` change record for each
-	// file updated during the turn. It is off for now because each run can spend a
-	// Claude Haiku call per changed file; diagrams are still generated on file open.
-	// Re-enable by restoring the import above and this assignment.
-	// hooks.Stop = [dimDefaultHookGroup(logStderr, {
-	// 	workspaceDir: input.workingDirectory.fsPath,
-	// 	dimStorageDir: input.dimHookStorageDir?.fsPath,
-	// })];
+	// When the agent finishes a turn, bring the `.dim` record of each file changed since
+	// the last commit up to date. The generator skips files whose code is unchanged.
+	hooks.Stop = [dimDefaultHookGroup(logStderr, {
+		workspaceDir: input.workingDirectory.fsPath,
+		dimStorageDir: input.dimHookStorageDir?.fsPath,
+	})];
 	const preToolUseHooks: NonNullable<Options['hooks']>['PreToolUse'] = [];
 	if (input.onPreToolUse) {
 		preToolUseHooks.push({

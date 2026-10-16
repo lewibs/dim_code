@@ -3,6 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import './media/dimPendingEdits.css';
+import { $, append } from '../../../../base/browser/dom.js';
+import { Button } from '../../../../base/browser/ui/button/button.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -11,7 +14,7 @@ import { ResourceMap } from '../../../../base/common/map.js';
 import { constObservable, IObservable, observableValue } from '../../../../base/common/observable.js';
 import { isEqual, joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
-import { ICodeEditor } from '../../../../editor/browser/editorBrowser.js';
+import { ICodeEditor, IOverlayWidget, IOverlayWidgetPosition } from '../../../../editor/browser/editorBrowser.js';
 import { EditorContributionInstantiation, registerEditorContribution } from '../../../../editor/browser/editorExtensions.js';
 import { EditorOption } from '../../../../editor/common/config/editorOptions.js';
 import { EditOperation } from '../../../../editor/common/core/editOperation.js';
@@ -23,12 +26,13 @@ import { IEditorWorkerService } from '../../../../editor/common/services/editorW
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { localize, localize2 } from '../../../../nls.js';
-import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator, IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IEditorPane } from '../../../common/editor.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
@@ -61,8 +65,8 @@ const DIM_ACTIVE_EDITOR_HAS_PENDING_EDITS = new RawContextKey<boolean>('dimActiv
 /** Whether anything in the workspace waits for review. */
 const DIM_HAS_PENDING_EDITS = new RawContextKey<boolean>('dimHasPendingEdits', false, localize('dimHasPendingEdits', "Whether the workspace has changes waiting for review"));
 
-/** Whether a text editor shows the changes waiting for review as inline hunks. */
-const DIM_PENDING_EDITS_IN_EDITOR = new RawContextKey<boolean>('dimPendingEditsInEditor', false, localize('dimPendingEditsInEditor', "Whether the editor shows changes waiting for review"));
+/** How far the review bar floats above the bottom of a text editor. */
+const REVIEW_BAR_MARGIN = 16;
 
 /** The URI scheme of the in-memory models that hold a file's accepted text. */
 const DIM_PENDING_SCHEME = 'dim-pending';
@@ -237,8 +241,8 @@ registerSingleton(IDimPendingEditsService, DimPendingEditsService, Instantiation
 
 /**
  * One file's changes waiting for review, as a diff between its accepted text (held in an
- * in-memory model) and its current text, in the shape the chat editing hunk widgets work
- * with. Changes are reviewed all or nothing, so keeping or undoing any hunk accepts or
+ * in-memory model) and its current text, in the shape the chat editing integration works
+ * with. Changes are reviewed all or nothing, so keeping or undoing any change accepts or
  * rejects the whole file.
  */
 class DimPendingDiff extends Disposable {
@@ -267,7 +271,7 @@ class DimPendingDiff extends Disposable {
 		this.ready = this._load();
 	}
 
-	/** The diff with its models, for the hunk widgets; only available once {@link ready}. */
+	/** The diff with its models, for the chat editing integration; only available once {@link ready}. */
 	get diffInfo(): IObservable<IDocumentDiff2> {
 		if (!this._diffInfo) {
 			throw new Error('DimPendingDiff is not ready');
@@ -352,9 +356,86 @@ class DimPendingDiff extends Disposable {
 }
 
 /**
+ * The bar that floats at the bottom of a text editor whose file has changes waiting for
+ * review, with Accept All and Reject All. Mirrors the review bar of the Dim diagram viewer
+ * (`extensions/mermaid-markdown-features/src/editorManager.ts`), so every view of a file
+ * reviews it the same way.
+ */
+class DimReviewBarWidget extends Disposable implements IOverlayWidget {
+
+	private static readonly ID = 'editor.widget.dimReviewBar';
+
+	private readonly _domNode = $('.dim-review-bar');
+	private _position: IOverlayWidgetPosition | null = null;
+
+	constructor(
+		private readonly _editor: ICodeEditor,
+		private readonly _file: URI,
+		@IDimPendingEditsService private readonly _pendingEditsService: IDimPendingEditsService,
+	) {
+		super();
+		this._domNode.setAttribute('role', 'toolbar');
+		this._domNode.setAttribute('aria-label', localize('dimReviewBar', "Changes Waiting for Review"));
+		append(this._domNode, $('span.dim-review-bar-title')).textContent = localize('dimReviewBarTitle', "Changes waiting for review");
+
+		const accept = this._register(new Button(this._domNode, { ...defaultButtonStyles, supportIcons: true, title: localize('dimReviewBarAcceptTitle', "Accept All Changes in the Workspace") }));
+		accept.label = `$(${Codicon.check.id}) ${localize('dimReviewBarAccept', "Accept All")}`;
+		const reject = this._register(new Button(this._domNode, { ...defaultButtonStyles, secondary: true, supportIcons: true, title: localize('dimReviewBarRejectTitle', "Reject All Changes in File") }));
+		reject.label = `$(${Codicon.discard.id}) ${localize('dimReviewBarReject', "Reject All")}`;
+
+		// Both stay disabled from a click until the review finishes, so a double click
+		// cannot accept or reject twice.
+		const run = async (action: () => Promise<void>) => {
+			accept.enabled = reject.enabled = false;
+			try {
+				await action();
+			} finally {
+				accept.enabled = reject.enabled = true;
+			}
+		};
+		this._register(accept.onDidClick(() => run(() => this._pendingEditsService.acceptAll())));
+		this._register(reject.onDidClick(() => run(() => this._pendingEditsService.rejectAll(this._file))));
+
+		this._editor.addOverlayWidget(this);
+		this._register(this._editor.onDidLayoutChange(() => this._layout()));
+		this._layout();
+	}
+
+	getId(): string {
+		return DimReviewBarWidget.ID;
+	}
+
+	getDomNode(): HTMLElement {
+		return this._domNode;
+	}
+
+	getPosition(): IOverlayWidgetPosition | null {
+		return this._position;
+	}
+
+	/** Centers the bar horizontally over the text, just above the bottom of the editor. */
+	private _layout(): void {
+		const layoutInfo = this._editor.getLayoutInfo();
+		const textWidth = layoutInfo.width - layoutInfo.verticalScrollbarWidth;
+		this._position = {
+			preference: {
+				top: Math.max(0, layoutInfo.height - layoutInfo.horizontalScrollbarHeight - this._domNode.offsetHeight - REVIEW_BAR_MARGIN),
+				left: Math.max(0, (textWidth - this._domNode.offsetWidth) / 2),
+			}
+		};
+		this._editor.layoutOverlayWidget(this);
+	}
+
+	override dispose(): void {
+		this._editor.removeOverlayWidget(this);
+		super.dispose();
+	}
+}
+
+/**
  * Shows a file's changes waiting for review in its text editor: removed lines in view zones, added ones
- * highlighted, as for chat edits. Hovering a change, or putting the cursor in one, shows Accept All
- * / Reject All for the whole file.
+ * highlighted, as for chat edits, and the review bar at the bottom. Changes are reviewed all or nothing,
+ * so there are no accept or reject buttons on the changes themselves.
  */
 class DimPendingEditsEditorContribution extends Disposable implements IEditorContribution {
 
@@ -363,16 +444,13 @@ class DimPendingEditsEditorContribution extends Disposable implements IEditorCon
 	private readonly _session = this._register(new MutableDisposable<DisposableStore>());
 	private _sessionKey: string | undefined;
 	private _integration: IModifiedFileEntryEditorIntegration | undefined;
-	private readonly _inEditor: IContextKey<boolean>;
 
 	constructor(
 		private readonly _editor: ICodeEditor,
 		@IDimPendingEditsService private readonly _pendingEditsService: IDimPendingEditsService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
-		@IContextKeyService contextKeyService: IContextKeyService,
 	) {
 		super();
-		this._inEditor = DIM_PENDING_EDITS_IN_EDITOR.bindTo(contextKeyService);
 		this._register(this._editor.onDidChangeModel(() => this._update()));
 		this._register(this._pendingEditsService.onDidChange(file => {
 			if (isEqual(file, this._editor.getModel()?.uri)) {
@@ -391,25 +469,24 @@ class DimPendingEditsEditorContribution extends Disposable implements IEditorCon
 		}
 		this._sessionKey = key;
 		this._integration = undefined;
-		this._inEditor.set(false);
 		this._session.clear();
 		if (!file || !pending) {
 			return;
 		}
 
 		const store = this._session.value = new DisposableStore();
+		store.add(this._instantiationService.createInstance(DimReviewBarWidget, this._editor, file));
 		const diff = store.add(this._instantiationService.createInstance(DimPendingDiff, file));
 		void diff.ready.then(() => {
 			if (store.isDisposed) {
 				return;
 			}
 			const entry = this._entry(file, diff);
-			this._integration = store.add(this._instantiationService.createInstance(ChatEditingCodeEditorIntegration, entry, this._editor, diff.diffInfo, true));
-			this._inEditor.set(true);
+			this._integration = store.add(this._instantiationService.createInstance(ChatEditingCodeEditorIntegration, entry, this._editor, diff.diffInfo, true, false));
 		});
 	}
 
-	/** The changes waiting for review in the shape of a chat editing entry, which the hunk widgets report to. */
+	/** The changes waiting for review in the shape of a chat editing entry, which the chat editing integration reports to. */
 	private _entry(file: URI, diff: DimPendingDiff): IModifiedFileEntry {
 		const service = this._pendingEditsService;
 		const diffInfo = diff.diffInfo;
@@ -458,17 +535,6 @@ registerAction2(class extends Action2 {
 			icon: Codicon.check,
 			precondition: DIM_HAS_PENDING_EDITS,
 			f1: true,
-			menu: [{
-				id: MenuId.EditorTitle,
-				group: 'navigation',
-				order: -10,
-				when: DIM_ACTIVE_EDITOR_HAS_PENDING_EDITS,
-			}, {
-				// On the widget that shows over a change in Raw: still every change.
-				id: MenuId.ChatEditingEditorHunk,
-				order: 1,
-				when: DIM_PENDING_EDITS_IN_EDITOR,
-			}],
 		});
 	}
 
@@ -488,20 +554,10 @@ registerAction2(class extends Action2 {
 			icon: Codicon.discard,
 			precondition: DIM_ACTIVE_EDITOR_HAS_PENDING_EDITS,
 			f1: true,
-			menu: [{
-				id: MenuId.EditorTitle,
-				group: 'navigation',
-				order: -9,
-				when: DIM_ACTIVE_EDITOR_HAS_PENDING_EDITS,
-			}, {
-				id: MenuId.ChatEditingEditorHunk,
-				order: 2,
-				when: DIM_PENDING_EDITS_IN_EDITOR,
-			}],
 		});
 	}
 
-	/** @param resource The file (from the diagram viewer), or nothing (the title bar, or the widget over a change, which passes the change) for the active editor's. */
+	/** @param resource The file (from the diagram viewer), or nothing for the active editor's. */
 	override async run(accessor: ServicesAccessor, resource?: unknown): Promise<void> {
 		const file = URI.isUri(resource) ? resource : accessor.get(IEditorService).activeEditor?.resource;
 		if (file) {

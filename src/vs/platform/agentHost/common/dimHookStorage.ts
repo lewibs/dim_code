@@ -105,6 +105,8 @@ export interface IDimTestCase {
 	readonly expected: string;
 	/** What the test replaces with a mock, stub, spy or fake; empty when it runs real code. */
 	readonly mocks: readonly string[];
+	/** How the file's changes waiting for review touched the test; unset when they did not. */
+	readonly change?: 'added' | 'changed' | 'removed';
 }
 
 /** Current `.dim` record format version. Bump when the JSON shape changes. */
