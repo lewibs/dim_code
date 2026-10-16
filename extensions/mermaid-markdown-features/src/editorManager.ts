@@ -9,6 +9,7 @@ import { escapeHtmlText } from './util/html';
 import { Disposable } from './util/dispose';
 import { renderMermaidConfigSpan } from './markdownMermaid/config';
 import { IDimChange, IDimTestCase } from './dimRecord';
+import { IDimUser } from './dimUsedBy';
 
 export const mermaidEditorViewType = 'vscode.mermaid-markdown-features.preview';
 
@@ -26,6 +27,8 @@ export interface IDimWebviewView {
 	readonly placeholder?: boolean;
 	/** On the README view of a test file: its tests, shown as a table under the overview. */
 	readonly tests?: readonly IDimTestCase[];
+	/** On the README view: the files that import the file, listed under "Used By". */
+	readonly usedBy?: readonly IDimUser[];
 	/** For a diagram: the elements the file's changes waiting for review touched, colored by change. */
 	readonly changes?: readonly IDimChange[];
 	/** For a diagram of a file git does not track yet: all of it is colored as added. */
@@ -313,8 +316,11 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 
 	// A test file's README also lists its tests. The README is the same whichever view
 	// is shown first, so the table is rendered once here and never swapped.
-	const tests = views.find(v => v.text !== undefined)?.tests;
+	const readmeView = views.find(v => v.text !== undefined);
+	const tests = readmeView?.tests;
 	const testsSection = tests && tests.length > 0 ? renderTestsSection(tests) : '';
+	const usedBy = readmeView?.usedBy;
+	const usedBySection = usedBy && usedBy.length > 0 ? renderUsedBySection(usedBy) : '';
 
 	// The status banner is always in the README so `dimStatus` messages can fill it in;
 	// it starts hidden when there is nothing to report. The icon classes mirror
@@ -456,6 +462,41 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				.dim-tests ul {
 					margin: 0;
 					padding-left: 20px;
+				}
+				.dim-used-by h2 {
+					margin: 24px 0 8px;
+					font-size: 1.15em;
+					font-weight: 600;
+				}
+				.dim-used-by ul {
+					display: flex;
+					flex-wrap: wrap;
+					gap: 6px;
+					margin: 0;
+					padding: 0;
+					list-style: none;
+				}
+				.dim-used-by button {
+					padding: 2px 8px;
+					border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+					border-radius: 4px;
+					background: var(--vscode-editorWidget-background);
+					color: var(--vscode-textLink-foreground);
+					font-family: var(--vscode-editor-font-family);
+					font-size: 0.95em;
+					cursor: pointer;
+				}
+				.dim-used-by-more {
+					align-self: center;
+					color: var(--vscode-descriptionForeground);
+				}
+				.dim-used-by button:hover {
+					border-color: var(--vscode-focusBorder);
+					color: var(--vscode-textLink-activeForeground);
+				}
+				.dim-used-by button:focus-visible {
+					outline: 1px solid var(--vscode-focusBorder);
+					outline-offset: 1px;
 				}
 				.dim-readme-placeholder {
 					color: var(--vscode-descriptionForeground);
@@ -792,12 +833,33 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 			<div class="dim-readme${testsSection ? ' dim-readme-wide' : ''}"${initialIsReadme ? '' : ' style="display: none;"'}>
 				${statusBanner}
 				<div class="dim-readme-text${readmePlaceholder ? ' dim-readme-placeholder' : ''}">${escapeHtmlText(readmeText)}</div>
+				${usedBySection}
 				${testsSection}
 			</div>
 			${reviewBar}
 			<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
 		</html>`;
+}
+
+/** At most this many files are listed under "Used By"; the rest are counted. */
+const maxUsedByShown = 24;
+
+/**
+ * Renders the files that import the file as a row of buttons, each opening that file in
+ * Dim. A button shows the file's name and its full path on hover, as two files in
+ * different folders can share a name.
+ */
+function renderUsedBySection(usedBy: readonly IDimUser[]): string {
+	const heading = `<h2>${escapeHtmlText(vscode.l10n.t("Used By"))}</h2>`;
+	const items = usedBy.slice(0, maxUsedByShown).map(user => {
+		const name = user.label.slice(user.label.lastIndexOf('/') + 1);
+		return `<li><button type="button" data-uri="${escapeHtmlText(user.uri)}" title="${escapeHtmlText(user.label)}">${escapeHtmlText(name)}</button></li>`;
+	});
+	if (usedBy.length > maxUsedByShown) {
+		items.push(`<li class="dim-used-by-more">${escapeHtmlText(vscode.l10n.t("and {0} more", usedBy.length - maxUsedByShown))}</li>`);
+	}
+	return `<section class="dim-used-by">${heading}<ul>${items.join('')}</ul></section>`;
 }
 
 /**

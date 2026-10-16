@@ -553,6 +553,11 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 		});
 	}
 
+	// The README's "Used By" buttons open the file that imports this one.
+	for (const button of document.querySelectorAll<HTMLButtonElement>('.dim-used-by button')) {
+		button.addEventListener('click', () => vscode.postMessage({ type: 'dimOpenUser', uri: button.dataset.uri }));
+	}
+
 	// Generation progress and the review state can change at any moment, including while
 	// the first diagram renders below, so listen for them before anything is awaited.
 	window.addEventListener('message', event => {

@@ -7,6 +7,7 @@ import { getMermaidEditorHtml, IDimStatusBanner } from './editorManager';
 import { DimGenerationStatus, DimGenerationStep } from './dimGenerate';
 import { dimFocusSymbol, IDimNavigateTarget, resolveDimNavigation } from './dimNavigate';
 import { IDimChange, IDimLink, IDimTestCase, parseDimDiff, parseDimReadme, parseDimRecord, parseDimTests } from './dimRecord';
+import { findDimUsers, IDimUser } from './dimUsedBy';
 import { acceptAllCommand, hasPendingChanges, rejectAllCommand } from './dimReview';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
@@ -73,6 +74,8 @@ interface IDimViewEntry {
 	readonly placeholder?: boolean;
 	/** On the README view of a test file: its tests, shown as a table under the overview. */
 	readonly tests?: readonly IDimTestCase[];
+	/** On the README view: the files that import the file, listed under "Used By". */
+	readonly usedBy?: readonly IDimUser[];
 	/** For a diagram: what each of its clickable elements stands for in the code. */
 	readonly links?: readonly IDimLink[];
 	/** For a diagram: the elements the file's changes waiting for review touched. */
@@ -181,8 +184,9 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			views: [],
 			index: 0,
 			render: async () => {
-				view.views = recordUri ? await loadViews(recordUri) : [buildReadmeView(undefined)];
-				const pending = await isPending();
+				// A focused view describes one symbol, not the file, so only a whole file lists its users.
+				const [usedBy, pending] = await Promise.all([sourceFile && !sourceFile.fragment ? findDimUsers(sourceFile) : [], isPending()]);
+				view.views = recordUri ? await loadViews(recordUri, usedBy) : [buildReadmeView(undefined, undefined, usedBy)];
 				// Show the type last selected for this source file (restored across hide/show
 				// and preserved across live re-renders); otherwise open on the always-present
 				// README overview, which is first.
@@ -206,9 +210,15 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		const updateReview = async () => {
 			webviewPanel.webview.postMessage({ type: 'dimReview', pending: await isPending() });
 		};
-		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type?: string; target?: IDimNavigateTarget; accept?: boolean }) => {
+		disposables.push(webviewPanel.webview.onDidReceiveMessage(async (message: { type?: string; target?: IDimNavigateTarget; accept?: boolean; uri?: string }) => {
 			if (message?.type === 'dimNavigate' && message.target) {
 				void this._navigateFromDiagram(key, message.target);
+			} else if (message?.type === 'dimOpenUser' && message.uri) {
+				// A file under the README's "Used By". Only a listed file is opened.
+				const user = view.views[0]?.usedBy?.find(entry => entry.uri === message.uri);
+				if (user) {
+					await vscode.commands.executeCommand(openDimCommand, user.uri);
+				}
 			} else if (message?.type === 'dimReview' && sourceFile) {
 				// The review bar's Accept All (every change in the workspace) / Reject All
 				// (this file's). Accepting drops the marks from the records, which re-renders
@@ -372,11 +382,11 @@ function isBigPictureRecord(uri: vscode.Uri): boolean {
  * record has none yet the view is an empty placeholder; the status banner fills it
  * while a generation run is in progress or has failed.
  */
-function buildReadmeView(readme: string | undefined, tests?: readonly IDimTestCase[]): IDimViewEntry {
+function buildReadmeView(readme: string | undefined, tests?: readonly IDimTestCase[], usedBy?: readonly IDimUser[]): IDimViewEntry {
 	if (readme && readme.length > 0) {
-		return { type: readmeViewType, label: vscode.l10n.t('README'), text: readme, tests };
+		return { type: readmeViewType, label: vscode.l10n.t('README'), text: readme, tests, usedBy };
 	}
-	return { type: readmeViewType, label: vscode.l10n.t('README'), text: '', placeholder: true, tests };
+	return { type: readmeViewType, label: vscode.l10n.t('README'), text: '', placeholder: true, tests, usedBy };
 }
 
 /**
@@ -385,7 +395,7 @@ function buildReadmeView(readme: string | undefined, tests?: readonly IDimTestCa
  * holds. Returns just the README (with its default message) when the record is
  * missing or unreadable.
  */
-async function loadViews(recordUri: vscode.Uri): Promise<IDimViewEntry[]> {
+async function loadViews(recordUri: vscode.Uri, usedBy: readonly IDimUser[]): Promise<IDimViewEntry[]> {
 	let content: string | undefined;
 	try {
 		content = new TextDecoder().decode(await vscode.workspace.fs.readFile(recordUri));
@@ -397,5 +407,5 @@ async function loadViews(recordUri: vscode.Uri): Promise<IDimViewEntry[]> {
 	const diagrams = content !== undefined ? parseDimRecord(content) : [];
 	const isNew = content !== undefined && !!parseDimDiff(content)?.isNew;
 	// A new file is wholly added, its tests included, as its diagrams are.
-	return [buildReadmeView(readme, isNew ? tests?.map(test => ({ ...test, change: 'added' as const })) : tests), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid, links: d.links, changes: d.changes, isNew }))];
+	return [buildReadmeView(readme, isNew ? tests?.map(test => ({ ...test, change: 'added' as const })) : tests, usedBy), ...diagrams.map(d => ({ type: d.type, label: d.label, mermaid: d.mermaid, links: d.links, changes: d.changes, isNew }))];
 }

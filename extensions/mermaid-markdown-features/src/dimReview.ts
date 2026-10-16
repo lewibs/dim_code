@@ -43,7 +43,7 @@ interface IGitResult {
  * Runs git in `cwd`, feeding it `input` on stdin. Node-only, like the generate command: in a
  * web extension host, which has no git to run, it reports that git could not run.
  */
-function git(cwd: string, args: readonly string[], input?: string): Promise<IGitResult> {
+export function git(cwd: string, args: readonly string[], input?: string): Promise<IGitResult> {
 	// See `registerDimGenerate` for why the platform check and the aliased require.
 	if ((process.platform as string) === 'web') {
 		return Promise.resolve({ code: undefined, stdout: '' });
@@ -56,6 +56,8 @@ function git(cwd: string, args: readonly string[], input?: string): Promise<IGit
 		child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
 		child.on('error', () => resolve({ code: undefined, stdout: '' }));
 		child.on('close', code => resolve({ code: code ?? undefined, stdout: Buffer.concat(chunks).toString() }));
+		// git may exit without reading its input; the closed pipe is not an error here.
+		child.stdin.on('error', () => { });
 		child.stdin.end(input ?? '');
 	});
 }
