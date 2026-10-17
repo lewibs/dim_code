@@ -6,7 +6,7 @@ Your agent writes code faster than you can read it. Dim lifts it up a level: eve
 
 Dim is a fork of [VS Code](https://github.com/microsoft/vscode) with Claude built in. Your extensions, keybindings and themes come with you.
 
-**[Download Dim](https://lewibs.github.io/dim/)** · [Releases](https://github.com/lewibs/dim_code/releases) · [Issues](https://github.com/lewibs/dim_code/issues)
+**[Download Dim](https://lewibs.github.io/dim/)** · [Releases](https://github.com/lewibs/dim/releases) · [Issues](https://github.com/lewibs/dim/issues)
 
 ## What it does
 
@@ -25,7 +25,7 @@ Summaries and diagrams are saved in a `.dim/` folder inside your project. Nothin
 
 ## Install
 
-Get the installer for your OS from the [landing page](https://lewibs.github.io/dim/) or the [latest release](https://github.com/lewibs/dim_code/releases/latest):
+Get the installer for your OS from the [landing page](https://lewibs.github.io/dim/) or the [latest release](https://github.com/lewibs/dim/releases/latest):
 
 | OS | File |
 | --- | --- |
@@ -53,7 +53,7 @@ See VS Code's [How to Contribute](https://github.com/microsoft/vscode/wiki/How-t
 
 ## Releasing
 
-The [`Dim Release`](.github/workflows/dim-release.yml) workflow builds macOS, Windows and Linux installers and attaches them to a GitHub Release whenever a `v*` tag is pushed:
+The [`Dim Release`](.github/workflows/dim-release.yml) workflow builds macOS, Windows and Linux installers and attaches them to a GitHub Release in the public [lewibs/dim](https://github.com/lewibs/dim) repo (this repo is private, so its own release files would not download for visitors) whenever a `v*` tag is pushed:
 
 ```sh
 git tag v0.2.0

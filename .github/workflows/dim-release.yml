@@ -1,8 +1,10 @@
 name: Dim Release
 
-# Builds Dim for macOS, Windows and Linux and attaches the installers to a GitHub Release.
+# Builds Dim for macOS, Windows and Linux and attaches the installers to a GitHub Release
+# in the public lewibs/dim repo, so they download even though this repo is private.
 # Push a tag like v0.1.0 to publish. The landing page links to
 # releases/latest/download/<name>, so the asset names below must stay fixed.
+# RELEASE_TOKEN is a fine-grained token with Contents read/write on lewibs/dim.
 
 on:
   push:
@@ -20,7 +22,8 @@ permissions:
 
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  RELEASE_REPO: lewibs/dim
+  GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   VSCODE_SKIP_PRELAUNCH: '1'
   ELECTRON_SKIP_BINARY_DOWNLOAD: 1
@@ -33,8 +36,8 @@ jobs:
     steps:
       - name: Create draft release
         run: |
-          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --title "Dim $TAG" --target "$GITHUB_SHA" \
+          if ! gh release view "$TAG" -R "$RELEASE_REPO" > /dev/null 2>&1; then
+            gh release create "$TAG" -R "$RELEASE_REPO" --draft --title "Dim $TAG" \
               --notes "Dim $TAG. The macOS and Windows builds are unsigned: on macOS run \`xattr -cr /Applications/Dim.app\` after moving it to Applications; on Windows choose More info → Run anyway."
           fi
 
@@ -91,7 +94,7 @@ jobs:
           cp .build/linux/deb/amd64/deb/*.deb Dim-linux-x64.deb
 
       - name: Upload to release
-        run: gh release upload "$TAG" Dim-linux-x64.tar.gz $( [ -f Dim-linux-x64.deb ] && echo Dim-linux-x64.deb ) --clobber -R "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" Dim-linux-x64.tar.gz $( [ -f Dim-linux-x64.deb ] && echo Dim-linux-x64.deb ) --clobber -R "$RELEASE_REPO"
 
   macos:
     name: macOS arm64
@@ -136,7 +139,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent Dim.app "$GITHUB_WORKSPACE/Dim-darwin-arm64.zip"
 
       - name: Upload to release
-        run: gh release upload "$TAG" Dim-darwin-arm64.zip --clobber -R "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" Dim-darwin-arm64.zip --clobber -R "$RELEASE_REPO"
 
   windows:
     name: Windows x64
@@ -198,7 +201,7 @@ jobs:
           Compress-Archive -Path ../VSCode-win32-x64/* -DestinationPath Dim-win32-x64.zip
 
       - name: Upload to release
-        run: gh release upload "$env:TAG" Dim-win32-x64-setup.exe Dim-win32-x64.zip --clobber -R "$env:GITHUB_REPOSITORY"
+        run: gh release upload "$env:TAG" Dim-win32-x64-setup.exe Dim-win32-x64.zip --clobber -R "$env:RELEASE_REPO"
 
   publish:
     name: Publish release
@@ -206,4 +209,4 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Mark release as latest
-        run: gh release edit "$TAG" --draft=false --latest -R "$GITHUB_REPOSITORY"
+        run: gh release edit "$TAG" --draft=false --latest -R "$RELEASE_REPO"
