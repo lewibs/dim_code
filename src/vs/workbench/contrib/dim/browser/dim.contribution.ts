@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../base/common/event.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
@@ -12,6 +13,10 @@ import { isEqual, joinPath, relativePath } from '../../../../base/common/resourc
 import { ResourceSet } from '../../../../base/common/map.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
+import { IRange } from '../../../../editor/common/core/range.js';
+import { DocumentSymbol } from '../../../../editor/common/languages.js';
+import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
+import { IOutlineModelService } from '../../../../editor/contrib/documentSymbols/browser/outlineModel.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
 import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimBigPictureRecord, isDimCodeFile, parseDimFocus, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { MenuId, MenuRegistry } from '../../../../platform/actions/common/actions.js';
@@ -20,6 +25,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { Extensions as ConfigurationExtensions, ConfigurationScope, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { TextEditorSelectionRevealType } from '../../../../platform/editor/common/editor.js';
 import { KeybindingsRegistry, KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
@@ -273,6 +279,8 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IDimPendingEditsService private readonly _pendingEditsService: IDimPendingEditsService,
+		@ITextModelService private readonly _textModelService: ITextModelService,
+		@IOutlineModelService private readonly _outlineModelService: IOutlineModelService,
 	) {
 		super();
 		this._viewAvailable = DIM_VIEW_AVAILABLE.bindTo(contextKeyService);
@@ -673,11 +681,55 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		}
 		// Reopen the same resource with the default (text) editor override: the diagram
 		// viewer and text editor share one resource, so this reuses the tab in place. A
-		// view focused on one symbol drops its focus fragment: the raw view is the file.
+		// view focused on one symbol drops its focus fragment: the raw view is the file,
+		// with the cursor on that symbol's declaration.
+		const file = ref.sourceUri.with({ fragment: '' });
+		const focus = parseDimFocus(ref.sourceUri);
+		const declaration = focus && await this._findDeclaration(file, focus.symbol);
 		await this._editorService.replaceEditors([{
 			editor: activeEditor,
-			replacement: { resource: ref.sourceUri.with({ fragment: '' }), options: { override: DEFAULT_EDITOR_ASSOCIATION.id, pinned: true } }
+			replacement: {
+				resource: file,
+				options: {
+					override: DEFAULT_EDITOR_ASSOCIATION.id,
+					pinned: true,
+					selection: declaration && { startLineNumber: declaration.startLineNumber, startColumn: declaration.startColumn },
+					selectionRevealType: TextEditorSelectionRevealType.CenterIfOutsideViewport,
+				}
+			}
 		}], group);
+	}
+
+	/**
+	 * Finds where a symbol is declared in a file through the file's document symbols,
+	 * matching its qualified name (`Owner.member`) before its last segment alone. Mirrors
+	 * `findDocumentSymbol` in the mermaid extension's `dimNavigate.ts`.
+	 *
+	 * @returns The range of the symbol's name, or `undefined` when the file has no such symbol.
+	 */
+	private async _findDeclaration(file: URI, symbol: string): Promise<IRange | undefined> {
+		try {
+			const reference = await this._textModelService.createModelReference(file);
+			try {
+				const outline = await this._outlineModelService.getOrCreate(reference.object.textEditorModel, CancellationToken.None);
+				const flat: { readonly qualified: string; readonly symbol: DocumentSymbol }[] = [];
+				const walk = (symbols: readonly DocumentSymbol[], prefix: string): void => {
+					for (const child of symbols) {
+						const qualified = prefix ? `${prefix}.${child.name}` : child.name;
+						flat.push({ qualified, symbol: child });
+						walk(child.children ?? [], qualified);
+					}
+				};
+				walk(outline.getTopLevelSymbols(), '');
+				const bare = symbol.slice(symbol.lastIndexOf('.') + 1);
+				const match = flat.find(entry => entry.qualified === symbol) ?? flat.find(entry => entry.symbol.name === bare);
+				return match?.symbol.selectionRange;
+			} finally {
+				reference.dispose();
+			}
+		} catch {
+			return undefined; // no symbols for this language, or the file could not be read
+		}
 	}
 
 	/**
