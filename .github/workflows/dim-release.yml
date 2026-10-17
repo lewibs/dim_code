@@ -4,7 +4,8 @@ name: Dim Release
 # in the public lewibs/dim repo, so they download even though this repo is private.
 # Push a tag like v0.1.0 to publish. The landing page links to
 # releases/latest/download/<name>, so the asset names below must stay fixed.
-# RELEASE_TOKEN is a fine-grained token with Contents read/write on lewibs/dim.
+# The three builds save their files as run artifacts; the publish job then creates the
+# release. RELEASE_TOKEN is a fine-grained token with Contents read/write on lewibs/dim.
 
 on:
   push:
@@ -23,27 +24,14 @@ permissions:
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
   RELEASE_REPO: lewibs/dim
-  GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   VSCODE_SKIP_PRELAUNCH: '1'
   ELECTRON_SKIP_BINARY_DOWNLOAD: 1
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
 jobs:
-  create-release:
-    name: Create release
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Create draft release
-        run: |
-          if ! gh release view "$TAG" -R "$RELEASE_REPO" > /dev/null 2>&1; then
-            gh release create "$TAG" -R "$RELEASE_REPO" --draft --title "Dim $TAG" \
-              --notes "Dim $TAG. The macOS and Windows builds are unsigned: on macOS run \`xattr -cr /Applications/Dim.app\` after moving it to Applications; on Windows choose More info → Run anyway."
-          fi
-
   linux:
     name: Linux x64
-    needs: create-release
     runs-on: ubuntu-24.04
     env:
       VSCODE_ARCH: x64
@@ -93,12 +81,14 @@ jobs:
           npm run gulp vscode-linux-x64-build-deb
           cp .build/linux/deb/amd64/deb/*.deb Dim-linux-x64.deb
 
-      - name: Upload to release
-        run: gh release upload "$TAG" Dim-linux-x64.tar.gz $( [ -f Dim-linux-x64.deb ] && echo Dim-linux-x64.deb ) --clobber -R "$RELEASE_REPO"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dim-linux-x64
+          path: Dim-linux-x64.*
+          if-no-files-found: error
 
   macos:
     name: macOS arm64
-    needs: create-release
     runs-on: macos-15
     env:
       VSCODE_ARCH: arm64
@@ -138,12 +128,14 @@ jobs:
           codesign --force --deep --sign - Dim.app
           ditto -c -k --sequesterRsrc --keepParent Dim.app "$GITHUB_WORKSPACE/Dim-darwin-arm64.zip"
 
-      - name: Upload to release
-        run: gh release upload "$TAG" Dim-darwin-arm64.zip --clobber -R "$RELEASE_REPO"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dim-darwin-arm64
+          path: Dim-darwin-arm64.zip
+          if-no-files-found: error
 
   windows:
     name: Windows x64
-    needs: create-release
     runs-on: windows-2022
     env:
       VSCODE_ARCH: x64
@@ -200,13 +192,32 @@ jobs:
           Copy-Item (Get-ChildItem .build/win32-x64/user-setup/*.exe | Select-Object -First 1).FullName Dim-win32-x64-setup.exe
           Compress-Archive -Path ../VSCode-win32-x64/* -DestinationPath Dim-win32-x64.zip
 
-      - name: Upload to release
-        run: gh release upload "$env:TAG" Dim-win32-x64-setup.exe Dim-win32-x64.zip --clobber -R "$env:RELEASE_REPO"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dim-win32-x64
+          path: |
+            Dim-win32-x64-setup.exe
+            Dim-win32-x64.zip
+          if-no-files-found: error
 
   publish:
     name: Publish release
     needs: [linux, macos, windows]
     runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     steps:
-      - name: Mark release as latest
-        run: gh release edit "$TAG" --draft=false --latest -R "$RELEASE_REPO"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release and upload installers
+        run: |
+          set -e
+          if ! gh release view "$TAG" -R "$RELEASE_REPO" > /dev/null 2>&1; then
+            gh release create "$TAG" -R "$RELEASE_REPO" --draft --title "Dim $TAG" \
+              --notes "Dim $TAG. The macOS and Windows builds are unsigned: on macOS run \`xattr -cr /Applications/Dim.app\` after moving it to Applications; on Windows choose More info → Run anyway."
+          fi
+          gh release upload "$TAG" dist/* --clobber -R "$RELEASE_REPO"
+          gh release edit "$TAG" --draft=false --latest -R "$RELEASE_REPO"
