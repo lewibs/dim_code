@@ -806,6 +806,11 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				.dim-change-text :is(text, tspan, span, div, p) {
 					color: var(--dim-change) !important;
 					fill: var(--dim-change) !important;
+				}
+				/* Bolding is limited to SVG text: an HTML label's box was sized by Mermaid before
+				   the change marks are added, so a wider weight would clip its end. */
+				.dim-change-text:is(text, tspan),
+				.dim-change-text :is(text, tspan) {
 					font-weight: 600;
 				}
 				.dim-change-removed.dim-change-text :is(text, tspan, span, div, p),
