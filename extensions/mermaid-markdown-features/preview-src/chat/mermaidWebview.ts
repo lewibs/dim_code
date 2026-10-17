@@ -91,6 +91,27 @@ export class PanZoomHandler {
 		this.container.addEventListener('mouseenter', e => this.updateCursorFromModifier(e));
 		window.addEventListener('keydown', e => this.handleKeyChange(e));
 		window.addEventListener('keyup', e => this.handleKeyChange(e));
+
+		// Find (Ctrl+F) reveals a match by scrolling the wrapper or the page, which are
+		// otherwise never scrolled; turn that scroll into a pan so the match stays in view.
+		document.addEventListener('scroll', e => this.handleScroll(e), true);
+	}
+
+	private handleScroll(e: Event): void {
+		const scroller = e.target === document ? document.scrollingElement : e.target;
+		if (scroller !== this.container && scroller !== document.scrollingElement) {
+			return;
+		}
+		const element = scroller as Element;
+		if (element.scrollLeft === 0 && element.scrollTop === 0) {
+			return;
+		}
+		this.translateX -= element.scrollLeft;
+		this.translateY -= element.scrollTop;
+		element.scrollLeft = 0;
+		element.scrollTop = 0;
+		this.applyTransform();
+		this.saveState();
 	}
 
 	private handleKeyChange(e: KeyboardEvent): void {

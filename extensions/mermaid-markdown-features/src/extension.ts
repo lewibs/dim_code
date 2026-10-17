@@ -44,7 +44,8 @@ export function activate(context: vscode.ExtensionContext) {
 		dimEditorViewType,
 		dimEditorProvider,
 		{
-			webviewOptions: { retainContextWhenHidden: false },
+			// The find widget (Ctrl+F) highlights matching words in the diagram and README.
+			webviewOptions: { retainContextWhenHidden: false, enableFindWidget: true },
 			supportsMultipleEditorsPerDocument: true
 		}
 	));
