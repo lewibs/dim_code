@@ -1,76 +1,67 @@
-# Visual Studio Code - Open Source ("Code - OSS")
-[![Feature Requests](https://img.shields.io/github/issues/microsoft/vscode/feature-request.svg)](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
-[![Bugs](https://img.shields.io/github/issues/microsoft/vscode/bug.svg)](https://github.com/microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
+# Dim
 
-## The Repository
+**The editor for understanding code faster.**
 
-This repository ("`Code - OSS`") is where we (Microsoft) develop the [Visual Studio Code](https://code.visualstudio.com) product together with the community. Not only do we work on code and issues here, but we also publish our [roadmap](https://github.com/microsoft/vscode/wiki/Roadmap), [monthly iteration plans](https://github.com/microsoft/vscode/wiki/Iteration-Plans), and our [endgame plans](https://github.com/microsoft/vscode/wiki/Running-the-Endgame). This source code is available to everyone under the standard [MIT license](https://github.com/microsoft/vscode/blob/main/LICENSE.txt).
+Your agent writes code faster than you can read it. Dim lifts it up a level: every file opens as a plain summary and a diagram of how it fits together, so you see what the code does before you read how.
 
-## Visual Studio Code
+Dim is a fork of [VS Code](https://github.com/microsoft/vscode) with Claude built in. Your extensions, keybindings and themes come with you.
 
-<p align="center">
-  <img alt="VS Code in action" src="https://github.com/user-attachments/assets/56af271c-949d-454c-a3ea-16188c063414">
-</p>
+**[Download Dim](https://lewibs.github.io/dim/)** · [Releases](https://github.com/lewibs/dim_code/releases) · [Issues](https://github.com/lewibs/dim_code/issues)
 
-[Visual Studio Code](https://code.visualstudio.com) is a distribution of the `Code - OSS` repository with Microsoft-specific customizations released under a traditional [Microsoft product license](https://code.visualstudio.com/License/).
+## What it does
 
-[Visual Studio Code](https://code.visualstudio.com) combines the simplicity of a code editor with what developers need for their core edit-build-debug cycle. It provides comprehensive code editing, navigation, and understanding support along with lightweight debugging, a rich extensibility model, and lightweight integration with existing tools.
+- **See what a file does before how.** Every file opens on a short summary of its purpose and a diagram of its shape: which classes exist and how they connect, which messages go where, or which states it moves through. The code is one click away.
+- **Move through code by its design.** Every box, method and arrow in a diagram is a link. Click one to zoom into that piece, or follow it to the file where it lives.
+- **Zoom out to the whole system.** Ask a question that spans many files, like "what happens when someone clicks Buy?", and Claude draws the flow across every component involved, then opens the files at the lines that matter.
+- **Know what your tests prove.** Open a test file and Dim lists every test in plain words: what it checks, what it feeds in, what it expects and what it mocks.
+- **Review the shape of a change, not just the diff.** Changes from the agent, a shell command or your own typing all wait for review. Changed nodes light up in the diagrams, and Accept All stages the whole change set.
+- **Diagrams stay current.** A file's diagram is redrawn only when its contents change, so the picture never drifts from the code.
 
-Visual Studio Code is updated monthly with new features and bug fixes. You can download it for Windows, macOS, and Linux on the [Visual Studio Code website](https://code.visualstudio.com/Download). To get the latest releases every day, install the [Insiders build](https://code.visualstudio.com/insiders).
+## Requirements
 
-## Contributing
+Dim runs Claude Code under the hood, so you need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) installed and signed in. Diagrams are generated with Claude Haiku through that CLI, at a few cents per changed file.
 
-There are many ways in which you can participate in this project, for example:
+Summaries and diagrams are saved in a `.dim/` folder inside your project. Nothing is uploaded except the code sent to Claude.
 
-* [Submit bugs and feature requests](https://github.com/microsoft/vscode/issues), and help us verify them as they are checked in
-* Review [source code changes](https://github.com/microsoft/vscode/pulls)
-* Review the [documentation](https://github.com/microsoft/vscode-docs) and make pull requests for anything from typos to new content.
+## Install
 
-If you are interested in fixing issues and contributing directly to the codebase, please see the document [How to Contribute](https://github.com/microsoft/vscode/wiki/How-to-Contribute), which covers the following:
+Get the installer for your OS from the [landing page](https://lewibs.github.io/dim/) or the [latest release](https://github.com/lewibs/dim_code/releases/latest):
 
-* [How to build and run from source](https://github.com/microsoft/vscode/wiki/How-to-Contribute)
-* [The development workflow, including debugging and running tests](https://github.com/microsoft/vscode/wiki/How-to-Contribute#debugging)
-* [Coding guidelines](https://github.com/microsoft/vscode/wiki/Coding-Guidelines)
-* [Submitting pull requests](https://github.com/microsoft/vscode/wiki/How-to-Contribute#pull-requests)
-* [Finding an issue to work on](https://github.com/microsoft/vscode/wiki/How-to-Contribute#where-to-contribute)
-* [Contributing to translations](https://aka.ms/vscodeloc)
+| OS | File |
+| --- | --- |
+| macOS (Apple silicon) | `Dim-darwin-arm64.zip` |
+| Windows | `Dim-win32-x64-setup.exe` |
+| Linux | `Dim-linux-x64.tar.gz` or `Dim-linux-x64.deb` |
 
-## Feedback
+The builds are not code signed yet:
 
-* Ask a question on [Stack Overflow](https://stackoverflow.com/questions/tagged/vscode)
-* [Request a new feature](CONTRIBUTING.md)
-* Upvote [popular feature requests](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
-* [File an issue](https://github.com/microsoft/vscode/issues)
-* Connect with the extension author community on [GitHub Discussions](https://github.com/microsoft/vscode-discussions/discussions) or [Slack](https://aka.ms/vscode-dev-community)
-* Follow [@code](https://x.com/code) and let us know what you think!
+- **macOS:** move `Dim.app` to Applications, then run `xattr -cr /Applications/Dim.app`.
+- **Windows:** when SmartScreen appears, choose **More info → Run anyway**.
 
-See our [wiki](https://github.com/microsoft/vscode/wiki/Feedback-Channels) for a description of each of these channels and information on some other available community-driven channels.
+## Build from source
 
-## Related Projects
+Use the Node version in [`.nvmrc`](.nvmrc).
 
-Many of the core components and extensions to VS Code live in their own repositories on GitHub. For example, the [node debug adapter](https://github.com/microsoft/vscode-node-debug) and the [mono debug adapter](https://github.com/microsoft/vscode-mono-debug) repositories are separate from each other. For a complete list, please visit the [Related Projects](https://github.com/microsoft/vscode/wiki/Related-Projects) page on our [wiki](https://github.com/microsoft/vscode/wiki).
+```sh
+npm ci
+npm run watch          # keep running; rebuilds on change
+./scripts/code.sh      # Linux and macOS
+.\scripts\code.bat     # Windows
+```
 
-## Bundled Extensions
+See VS Code's [How to Contribute](https://github.com/microsoft/vscode/wiki/How-to-Contribute) guide for platform prerequisites.
 
-VS Code includes a set of built-in extensions located in the [extensions](extensions) folder, including grammars and snippets for many languages. Extensions that provide rich language support (inline suggestions, Go to Definition) for a language have the suffix `language-features`. For example, the `json` extension provides coloring for `JSON` and the `json-language-features` extension provides rich language support for `JSON`.
+## Releasing
 
-## Development Container
+The [`Dim Release`](.github/workflows/dim-release.yml) workflow builds macOS, Windows and Linux installers and attaches them to a GitHub Release whenever a `v*` tag is pushed:
 
-This repository includes a Visual Studio Code Dev Containers / GitHub Codespaces development container.
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
 
-* For [Dev Containers](https://aka.ms/vscode-remote/download/containers), use the **Dev Containers: Clone Repository in Container Volume...** command, which creates a Docker volume for better disk I/O on macOS and Windows.
-  * If you already have VS Code and Docker installed, you can also click [here](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/microsoft/vscode) to get started. This will cause VS Code to automatically install the Dev Containers extension if needed, clone the source code into a container volume, and spin up a dev container for use.
-
-* For Codespaces, install the [GitHub Codespaces](https://marketplace.visualstudio.com/items?itemName=GitHub.codespaces) extension in VS Code, and use the **Codespaces: Create New Codespace** command.
-
-Docker / the Codespace should have at least **4 cores and 6 GB of RAM (8 GB recommended)** to run a full build. See the [development container README](.devcontainer/README.md) for more information.
-
-## Code of Conduct
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information, see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+The release is published once all three builds succeed. The landing page links to `releases/latest/download/<file>`, so keep the asset names unchanged.
 
 ## License
 
-Copyright (c) Microsoft Corporation. All rights reserved.
-
-Licensed under the [MIT](LICENSE.txt) license.
+Dim is based on [Code - OSS](https://github.com/microsoft/vscode) and is released under the [MIT license](LICENSE.txt).
