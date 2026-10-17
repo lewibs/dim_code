@@ -3,7 +3,7 @@
 **Reach for it when** a single function or method's own branching and looping control flow is the point — the thing worth understanding is *how it decides*, not who it calls.
 
 **Show:**
-- The routine's guards, branches and loops, as the code actually nests them.
+- All of the routine's guards, branches, loops, early returns and throws, as the code actually nests them. Every path through the code is a path through the chart; never merge or drop one because it seems minor.
 - Each decision as a condition the reader can match to the source; each terminal as a real outcome (return value, thrown error, early exit).
 - One routine per flowchart. If several functions each have interesting control flow, prefer a Structure view of the module and reserve a flowchart for the one function whose branching genuinely carries the file.
 

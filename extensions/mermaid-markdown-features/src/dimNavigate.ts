@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
-import { clickedNames, unique } from './dimNames';
+import { clickedNames, findLink, lastSegment, unique } from './dimNames';
 import { DimLinkKind, DimLinkView, IDimLink } from './dimRecord';
 
 /**
@@ -141,35 +141,6 @@ function destinationFor(sourceFile: vscode.Uri, resolved: IResolvedSymbol): IDim
 	}
 	const sameFile = file.toString() === sourceFile.toString();
 	return sameFile ? { uri: formatDimFocus(file, kind, symbol), viewId } : { uri: file, viewId };
-}
-
-/** The last dotted segment of a qualified name: `Foo.save` → `save`. */
-function lastSegment(name: string): string {
-	return name.slice(name.lastIndexOf('.') + 1);
-}
-
-/**
- * Finds the link a click names: by its drawn label first, then by its symbol, then by
- * the last segment of either (a member drawn without its owner).
- */
-function findLink(links: readonly IDimLink[], names: readonly string[]): IDimLink | undefined {
-	if (links.length === 0) {
-		return undefined;
-	}
-	for (const name of names) {
-		const byLabel = links.find(link => link.label.trim() === name);
-		if (byLabel) {
-			return byLabel;
-		}
-	}
-	for (const name of names) {
-		const bySymbol = links.find(link => link.symbol === name);
-		if (bySymbol) {
-			return bySymbol;
-		}
-	}
-	const bare = lastSegment(names[names.length - 1]);
-	return links.find(link => lastSegment(link.label.trim()) === bare || lastSegment(link.symbol) === bare);
 }
 
 /**

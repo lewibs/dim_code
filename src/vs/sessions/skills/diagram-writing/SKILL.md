@@ -33,7 +33,14 @@ This table is the single source of truth for which kinds exist. The generator `g
 
 - Base every diagram on what *this* code actually contains, using the real identifiers from it — real class, function, field and participant names, not placeholders.
 - When a type the file references is defined in the imported definitions provided alongside the code, populate it with its real members. Never leave a referenced type as an empty box.
-- Keep the diagram readable: show the structure or behavior that matters, not every incidental detail.
+- **Draw every element whole.** You choose *which* elements a diagram shows, but each element you draw shows everything about it, never a selection. A reader must be able to trust that what a box doesn't list, the code doesn't have. Each kind's skill says what "whole" means for it:
+  - a class, interface or type box lists **every** member: each field and property, constructor parameter properties, every method, getter and setter, static and instance, public, protected and private alike;
+  - a module box lists every function it declares;
+  - a drawn routine (a flowchart, or a sequence of one function's calls) shows every branch, guard, early return, throw, loop and call it makes;
+  - a state diagram shows every value the attribute can take and every transition between them;
+  - an entity shows every attribute.
+- Keep the diagram readable by drawing **fewer elements**, or by splitting a large element into a view focused on it, never by trimming the elements you draw.
+- An imported type is drawn whole too. Draw it only when its full definition is in front of you: if the definition you were given was cut short, read the rest, or leave the type as a plain referenced name in a relationship rather than drawing a partial box.
 
 ## Making every element clickable (links)
 
@@ -41,10 +48,10 @@ Every box and every line of text in a Dim diagram is clickable. A click opens th
 
 ```json
 "links": [
-  { "label": "SessionManager", "symbol": "SessionManager", "kind": "class", "file": "src/session/sessionManager.ts" },
-  { "label": "SessionManager.state", "symbol": "SessionManager.state", "kind": "attribute", "file": "src/session/sessionManager.ts" },
-  { "label": "openSession", "symbol": "SessionManager.openSession", "kind": "function", "file": "src/session/sessionManager.ts" },
-  { "label": "Store", "symbol": "SessionStore", "kind": "class", "file": "src/session/sessionStore.ts" }
+  { "label": "SessionManager", "symbol": "SessionManager", "kind": "class", "file": "src/session/sessionManager.ts", "detail": "Owns the open sessions and the one in focus." },
+  { "label": "SessionManager.state", "symbol": "SessionManager.state", "kind": "attribute", "file": "src/session/sessionManager.ts", "detail": "Whether the manager is idle, opening or closing a session." },
+  { "label": "openSession", "symbol": "SessionManager.openSession", "kind": "function", "file": "src/session/sessionManager.ts", "detail": "Restores a session from the store, or starts a new one." },
+  { "label": "Store", "symbol": "SessionStore", "kind": "class", "file": "src/session/sessionStore.ts", "detail": "Saves sessions to disk between launches." }
 ]
 ```
 
@@ -62,6 +69,7 @@ Every box and every line of text in a Dim diagram is clickable. A click opens th
 - **`file`** is the workspace-relative path of the file that defines the symbol. Use the main file's path for its own symbols, and the paths given for the imported definitions for theirs. Leave `file` out only when the symbol's file is genuinely unknown (e.g. a library type); the editor then searches the workspace for it.
 - Link every box, member, participant and message that stands for real code. Skip pure prose (a flowchart step like "validate input", a return label like "ok").
 - **`view`** (optional) picks the view the link opens on, in place of the one its kind opens on: `readme`, `classDiagram`, `sequenceDiagram`, `flowchart`, `stateDiagram`, `erDiagram`, or `raw` for the file itself in the text editor. Use it when one view of the target answers what the element is about, e.g. `"view": "sequenceDiagram"` for a participant whose behavior matters more than its structure.
+- **`detail`** is one short sentence on what the element does or holds, in plain words, shown in a card when the pointer rests on the element. Say what the drawing can't: its purpose or effect, not its name or type again. Give one on every link.
 - **`line`** and **`endLine`** (optional, 1-based) point at specific lines of `file`. A link with a line opens the file raw with those lines selected (just `line` when `endLine` is left out). Use them for an element that stands for a few lines rather than a symbol, such as a flowchart step that is one `if` in a long function. Give lines only when you read them from the file's current code.
 
 ## Focused views

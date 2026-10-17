@@ -25,7 +25,9 @@
 #   DIM_CHANGES_MODEL - optional: the Claude model to draw with (default sonnet).
 #
 # Regeneration is gated on a hash of the changes, stamped into the record as
-# `changesHash`: an unchanged set of changes costs nothing.
+# `changesHash`: an unchanged set of changes costs nothing. The record is also stamped
+# with the commit it was drawn on (`head`); once HEAD moves (a commit), the editor's
+# commit sync clears it (see `dimDiff.ts`).
 #
 # Exit status, the same codes as generateDimDiagram.sh (see `dimGenerate.ts`):
 #   0  generated, already up to date, or nothing to do
@@ -67,7 +69,10 @@ if [ -z "$diffText" ] && [ -z "$untracked" ]; then
 	exit 0
 fi
 
-changesHash=$(printf '%s\n%s\n%s' "$diffText" "$untracked" "$untrackedText" | git hash-object --stdin)
+# Bump the version when the prompt changes, so diagrams drawn by the old one are redrawn.
+promptVersion=2
+changesHash=$(printf '%s\n%s\n%s\n%s' "$promptVersion" "$diffText" "$untracked" "$untrackedText" | git hash-object --stdin)
+headSha=$(git rev-parse --verify -q HEAD 2>/dev/null)
 if [ -f "$OUT" ] && grep -q "\"changesHash\": \"$changesHash\"" "$OUT"; then
 	echo "generateDimChanges: changes record is up to date."
 	exit 0
@@ -116,21 +121,28 @@ stat=$(git diff --stat --no-color -- . ':(exclude).dim' 2>/dev/null | tail -n 40
 diffCapped=$(printf '%s' "$diffText" | head -c 120000)
 
 prompt=$(cat <<PROMPT
-You explain a set of code changes inside an IDE. The workspace is the current directory. Below are ALL the changes waiting for the user's review, across every file. Draw ONE big-picture view of them: a single Mermaid diagram (two only if one cannot show it) that shows how the changes fit together and with the code around them, and write a README that explains them.
+You explain a set of code changes inside an IDE. The workspace is the current directory. Below are ALL the changes waiting for the user's review, across every file. Draw a big-picture view of them that gives the developer the full context: not just what changed, but the code the changes live in and work with, so someone who has never seen this code understands what the changes do and how they fit. Usually one or two Mermaid diagrams (a third only if it shows something the others cannot), and a README that explains them.
 
-Use your Read, Grep and Glob tools to look at the code around the changes: the callers of changed functions, the types they use, the classes they belong to, the other side of a message or event. Include in the diagram the unchanged elements a reader needs to understand the changes (drawn without change marks), and leave out everything else. Every name you draw must exist in the code.
+Before drawing, use your Read, Grep and Glob tools to explore the code around the changes. Read the whole of each changed file, not just the diff. Look up:
+- the classes, interfaces and modules the changed code belongs to;
+- the callers of changed functions, and the functions and services they call;
+- the types they take, return and store;
+- the other side of each message, event, command or hook they send or handle;
+- the flow the changes are part of, from what starts it to where it ends.
+
+Draw the changed elements together with that surrounding code. Unchanged elements are drawn without change marks; they are what gives the changes meaning, so include every one a developer needs to follow the flow, and leave out only code with no bearing on it. Draw every element you include whole, as the skill's "Draw every element whole" rule says: a class or interface box lists ALL of its members, changed or not; a routine shows ALL its branches and calls. Every name you draw must exist in the code.
 
 Method for drawing (includes the catalog of kinds):
 ${skillGeneral}
 ${skillsHint}
 
 Output rules:
-- "readme" is plain text (no markdown). Start with one or two sentences on what the changes do as a whole. Then a short paragraph per area of change saying what changed and why it matters, naming the real classes and functions. End with a "Files:" list of each changed file (workspace-relative path), one per line, with a few words on what changed in it.
+- "readme" is plain text (no markdown). Start with one or two sentences on what the changes do as a whole. Then a paragraph on the surrounding code they fit into: what starts the flow, which parts take part, and where it ends. Then a short paragraph per area of change saying what changed, why it matters, and what it affects around it, naming the real classes and functions. End with a "Files:" list of each changed file (workspace-relative path), one per line, with a few words on what changed in it.
 - Each diagram has "type" (the catalog's Mermaid keyword, e.g. "stateDiagram"), "label" (the catalog's label for that kind), "mermaid" (valid Mermaid source beginning with its keyword) and "links".
-- "links" maps every box, member, participant and message drawn to its code: {"label": ..., "symbol": ..., "kind": "class"|"function"|"attribute"|"file", "file": "<workspace-relative path>"}.
+- "links" maps every box, member, participant and message drawn to its code: {"label": ..., "symbol": ..., "kind": "class"|"function"|"attribute"|"file", "file": "<workspace-relative path>", "detail": "<one sentence on what it does, or for a changed element, what the change does>"}.
 - Mark the changes as the skill's "Showing changes" section says: a "changes" list on each diagram naming every added, changed and removed element, and each removed element kept drawn inside "%% dim:removed" / "%% dim:end" lines. Elements of a new file are "added". Context elements get no marks.
 - Output ONLY the JSON object, no markdown fences and no prose outside it, shaped like:
-  {"readme":"...","diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"src/foo.ts"}],"changes":[{"label":"Foo.bar","change":"added"}]}]}
+  {"readme":"...","diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"src/foo.ts","detail":"..."}],"changes":[{"label":"Foo.bar","change":"added"}]}]}
 
 --- CHANGED FILES ---
 $stat
@@ -189,6 +201,6 @@ echo "DIM_PROGRESS saving"
 
 tmp="$OUT.tmp.$$"
 printf '%s\n' "$result" \
-	| sed "1 s|{|{\"version\": 1, \"changesHash\": \"$changesHash\",|" \
+	| sed "1 s|{|{\"version\": 1, \"changesHash\": \"$changesHash\", \"head\": \"$headSha\",|" \
 	> "$tmp" && mv "$tmp" "$OUT"
 echo "generateDimChanges: generated the changes diagram."

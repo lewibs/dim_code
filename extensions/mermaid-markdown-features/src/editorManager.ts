@@ -8,7 +8,7 @@ import { MermaidWebviewManager } from './webviewManager';
 import { escapeHtmlText } from './util/html';
 import { Disposable } from './util/dispose';
 import { renderMermaidConfigSpan } from './markdownMermaid/config';
-import { IDimChange, IDimTestCase } from './dimRecord';
+import { IDimChange, IDimLink, IDimTestCase } from './dimRecord';
 import { IDimUser } from './dimUsedBy';
 
 export const mermaidEditorViewType = 'vscode.mermaid-markdown-features.preview';
@@ -29,6 +29,8 @@ export interface IDimWebviewView {
 	readonly tests?: readonly IDimTestCase[];
 	/** On the README view: the files that import the file, listed under "Used By". */
 	readonly usedBy?: readonly IDimUser[];
+	/** For a diagram: what each of its elements stands for in the code, described on hover. */
+	readonly links?: readonly IDimLink[];
 	/** For a diagram: the elements the file's changes waiting for review touched, colored by change. */
 	readonly changes?: readonly IDimChange[];
 	/** For a diagram of a file git does not track yet: all of it is colored as added. */
@@ -311,8 +313,21 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 	// in place. `type="application/json"` is a data block (not executed), and
 	// `<`/`>`/`&` are escaped so the payload cannot break out of the script element.
 	const viewData = views.length > 0
-		? `<script type="application/json" id="dim-views" nonce="${nonce}">${JSON.stringify(views.map(v => ({ label: v.label, mermaid: v.mermaid, text: v.text, placeholder: v.placeholder, changes: v.changes, isNew: v.isNew }))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`
+		? jsonDataBlock('dim-views', nonce, views.map(v => ({ label: v.label, mermaid: v.mermaid, text: v.text, placeholder: v.placeholder, links: v.links, changes: v.changes, isNew: v.isNew })))
 		: '';
+	// The words of the card that describes a diagram element on hover (Dim editor only).
+	const hoverLabels = clickable ? jsonDataBlock('dim-hover-labels', nonce, {
+		class: vscode.l10n.t("Class"),
+		function: vscode.l10n.t("Function"),
+		attribute: vscode.l10n.t("Attribute"),
+		file: vscode.l10n.t("File"),
+		added: vscode.l10n.t("Added"),
+		changed: vscode.l10n.t("Changed"),
+		removed: vscode.l10n.t("Removed"),
+		line: vscode.l10n.t("line {0}"),
+		lines: vscode.l10n.t("lines {0}–{1}"),
+		open: vscode.l10n.t("Click to open"),
+	}) : '';
 
 	// A test file's README also lists its tests. The README is the same whichever view
 	// is shown first, so the table is rendered once here and never swapped.
@@ -702,6 +717,55 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 					stroke: var(--vscode-focusBorder) !important;
 					stroke-opacity: 0.35;
 				}
+				/* The card that describes the diagram element under the pointer, styled like the
+				   editor's own hovers. It never takes the pointer, so it cannot block a click. */
+				.dim-hover {
+					position: fixed;
+					z-index: 20;
+					max-width: 360px;
+					padding: 6px 10px;
+					border: 1px solid var(--vscode-editorHoverWidget-border);
+					border-radius: 4px;
+					background: var(--vscode-editorHoverWidget-background);
+					color: var(--vscode-editorHoverWidget-foreground);
+					box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+					font-size: var(--vscode-font-size);
+					line-height: 1.4;
+					pointer-events: none;
+				}
+				.dim-hover[hidden] {
+					display: none;
+				}
+				.dim-hover-title {
+					font-family: var(--vscode-editor-font-family);
+					font-weight: 600;
+					overflow-wrap: anywhere;
+				}
+				.dim-hover-meta {
+					display: flex;
+					flex-wrap: wrap;
+					gap: 6px;
+					margin-top: 2px;
+					color: var(--vscode-descriptionForeground);
+				}
+				.dim-hover-change[data-change="added"] { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
+				.dim-hover-change[data-change="changed"] { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+				.dim-hover-change[data-change="removed"] { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
+				.dim-hover-detail {
+					margin-top: 4px;
+				}
+				.dim-hover-location {
+					margin-top: 4px;
+					font-family: var(--vscode-editor-font-family);
+					font-size: 0.9em;
+					color: var(--vscode-textLink-foreground);
+					overflow-wrap: anywhere;
+				}
+				.dim-hover-hint {
+					margin-top: 4px;
+					font-size: 0.9em;
+					color: var(--vscode-descriptionForeground);
+				}
 				/* The Dim editor draws diagrams like the editor's own widgets: rounded cards with a
 				   hairline border on a dotted canvas, quiet edges, and labels on a chip. Every rule
 				   is wrapped in :where() so it has no specificity and the change colors below win;
@@ -826,6 +890,7 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 		<body data-dim-clickable="${clickable}" data-dim-index="${index}" data-vscode-context='${JSON.stringify({ preventDefaultContextMenuItems: true, mermaidWebviewId: diagramId })}' data-vscode-mermaid-webview-id="${diagramId}">
 			${renderMermaidConfigSpan()}
 			${viewData}
+			${hoverLabels}
 			<div class="zoom-controls"${initialIsReadme ? ' style="display: none;"' : ''}>
 				<button class="pan-mode-btn" title="${togglePanModeLabel}" aria-label="${togglePanModeLabel}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i></button>
 				<button class="zoom-out-btn" title="${zoomOutLabel}" aria-label="${zoomOutLabel}"><i class="codicon codicon-zoom-out" aria-hidden="true"></i></button>
@@ -849,6 +914,14 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 
 /** At most this many files are listed under "Used By"; the rest are counted. */
 const maxUsedByShown = 24;
+
+/**
+ * Embeds `data` in the page as a JSON data block. `type="application/json"` is not
+ * executed, and `<`/`>`/`&` are escaped so the payload cannot break out of the element.
+ */
+function jsonDataBlock(id: string, nonce: string, data: unknown): string {
+	return `<script type="application/json" id="${id}" nonce="${nonce}">${JSON.stringify(data).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>`;
+}
 
 /**
  * Renders the files that import the file as a row of buttons, each opening that file in

@@ -4,7 +4,7 @@
 
 **Show:**
 - The entities (tables / record types) the code defines, named from it.
-- Each entity's meaningful attributes, with their types and any key markers.
+- Every attribute of each entity, with its type and any key markers.
 - The relationships between entities and their cardinality (one-to-one, one-to-many, many-to-many).
 
 **Mermaid essentials:**

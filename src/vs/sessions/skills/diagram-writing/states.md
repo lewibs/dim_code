@@ -3,8 +3,8 @@
 **Reach for it when** a class has a **stateful parameter** — a field or property whose value moves through a fixed set of modes — or the code models a lifecycle / state machine (a session, a connection, a picker, a wizard).
 
 **Show:**
-- The distinct modes the value (or the object) can be in, named from the code's own constants / enum / string literals.
-- The transitions between them, labelled with what triggers each one (the method call, event or condition that moves it).
+- Every mode the value (or the object) can be in, named from the code's own constants / enum / string literals.
+- Every transition between them, labelled with what triggers it (the method call, event or condition that moves it). Each place in the code that changes the value is a transition.
 - The entry point, and a terminal state when the lifecycle genuinely ends.
 
 **Mermaid essentials:**

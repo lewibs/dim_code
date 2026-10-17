@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { clickedNames } from '../../src/dimNames';
+import { clickedNames, findLink } from '../../src/dimNames';
 
 /**
  * A place a diagram click should navigate to. This is only the *shape* of the request:
@@ -50,6 +50,48 @@ export interface DimChange {
 }
 
 /**
+ * What a diagram element stands for in the code, as the record's `links` say. Mirrors
+ * `IDimLink` in the extension's `src/dimRecord.ts`; keep the two in sync.
+ */
+export interface DimLink {
+	readonly label: string;
+	readonly symbol: string;
+	readonly kind: 'class' | 'function' | 'attribute' | 'file';
+	readonly file?: string;
+	readonly line?: number;
+	readonly endLine?: number;
+	readonly detail?: string;
+}
+
+/** The localized words of the hover card, from the page's `#dim-hover-labels` data block. */
+export interface DimHoverLabels {
+	readonly class: string;
+	readonly function: string;
+	readonly attribute: string;
+	readonly file: string;
+	readonly added: string;
+	readonly changed: string;
+	readonly removed: string;
+	/** `line {0}`. */
+	readonly line: string;
+	/** `lines {0}–{1}`. */
+	readonly lines: string;
+	readonly open: string;
+}
+
+/** What the hover card says about one element. */
+interface DimHoverInfo {
+	readonly title: string;
+	readonly link?: DimLink;
+	readonly change?: DimChange['change'];
+	/** Whether a click on the element can open something. */
+	readonly opens: boolean;
+}
+
+/** How long the pointer rests on an element before its card shows, in milliseconds. */
+const hoverDelay = 350;
+
+/**
  * Makes the boxes and the individual text lines of a rendered mermaid diagram
  * clickable, so one diagram can carry *many* independent click targets per box — the
  * box itself, plus each attribute and method inside it — instead of mermaid's single
@@ -91,13 +133,169 @@ export function markDiagramChanges(root: HTMLElement, changes: readonly DimChang
 	}
 	const byLabel = new Map(changes.map(change => [change.label, change.change]));
 	visitDiagramElements(svg, (el, target, role) => {
-		const names = clickedNames(target);
-		const candidates = target.kind === 'member' && target.node ? names.slice(0, 1) : [...names, target.member ?? target.node];
-		const change = isNew ? 'added' : candidates.map(name => byLabel.get(name)).find(found => !!found);
+		const change = changeOf(target, byLabel, isNew);
 		if (change) {
 			el.classList.add('dim-change', `dim-change-${change}`, `dim-change-${role}`);
 		}
 	});
+}
+
+/**
+ * How an element changed, by the names it goes by. A member is matched only by its
+ * qualified `Box.member` name, so a same-named member of another box never matches.
+ */
+function changeOf(target: DimNavigateTarget, byLabel: ReadonlyMap<string, DimChange['change']>, isNew: boolean): DimChange['change'] | undefined {
+	if (isNew) {
+		return 'added';
+	}
+	const names = clickedNames(target);
+	const candidates = target.kind === 'member' && target.node ? names.slice(0, 1) : [...names, target.member ?? target.node];
+	return candidates.map(name => byLabel.get(name)).find(found => !!found);
+}
+
+/**
+ * Shows a card describing the element under the pointer once it rests there: the code it
+ * stands for (its symbol and kind), the link's one-line `detail`, where it is defined,
+ * how the changes waiting for review touched it, and whether a click opens it. An element
+ * inside a box (a member row, a message) wins over the box. Elements with nothing to add
+ * to their own text (prose with no link or change) get no card. Safe to call after every
+ * (re-)render.
+ *
+ * @param root The element the diagram's `<svg>` was rendered into.
+ * @param links The shown diagram's links, looked up first.
+ * @param otherLinks The links of the record's other diagrams, looked up next.
+ * @param changes The shown diagram's changes; ignored when `isNew` is set.
+ * @param isNew The whole file is new since the diff base, so every element is added.
+ * @param labels The card's localized words.
+ */
+export function enhanceDiagramHovers(root: HTMLElement, links: readonly DimLink[], otherLinks: readonly DimLink[], changes: readonly DimChange[], isNew: boolean, labels: DimHoverLabels): void {
+	const svg = root.querySelector('svg');
+	if (!svg || svg.dataset[boundAttr]) {
+		return;
+	}
+	svg.dataset[boundAttr] = '1';
+	const byLabel = new Map(changes.map(change => [change.label, change.change]));
+	const infos = new Map<Element, DimHoverInfo>();
+	visitDiagramElements(svg, (el, target, role) => {
+		const names = clickedNames(target);
+		const link = findLink(links, names) ?? findLink(otherLinks, names);
+		const change = changeOf(target, byLabel, isNew);
+		const text = target.member ?? target.node;
+		if (!link && !change) {
+			return; // prose: the card would only repeat what is drawn
+		}
+		const info: DimHoverInfo = { title: link?.symbol || names[0] || text, link, change, opens: !!link || names.length > 0 };
+		infos.set(el, info);
+		if (role === 'line') {
+			infos.set(widenHitArea(el), info);
+		}
+	});
+
+	const card = hoverCard(root.ownerDocument);
+	let shown: Element | undefined;
+	let timer: number | undefined;
+	const hide = (): void => {
+		window.clearTimeout(timer);
+		shown = undefined;
+		card.hidden = true;
+	};
+	svg.addEventListener('pointerover', event => {
+		const el = innermost(event.target as Element | null, svg, infos);
+		if (el === shown) {
+			return;
+		}
+		hide();
+		if (!el) {
+			return;
+		}
+		const { clientX, clientY } = event;
+		timer = window.setTimeout(() => {
+			shown = el;
+			fillHoverCard(card, infos.get(el)!, labels);
+			placeHoverCard(card, clientX, clientY);
+		}, hoverDelay);
+	});
+	svg.addEventListener('pointerleave', hide);
+	// A pan, a zoom or a click moves on from the element: the card would be in the way.
+	svg.addEventListener('pointerdown', hide);
+	svg.addEventListener('wheel', hide, { passive: true });
+}
+
+/** The element under the pointer that has a card, innermost first, or `undefined`. */
+function innermost(start: Element | null, svg: SVGSVGElement, infos: ReadonlyMap<Element, DimHoverInfo>): Element | undefined {
+	for (let el = start; el && el !== svg; el = el.parentElement) {
+		if (infos.has(el)) {
+			return el;
+		}
+	}
+	return undefined;
+}
+
+/** The page's one hover card, made on first use. */
+function hoverCard(doc: Document): HTMLElement {
+	const existing = doc.querySelector<HTMLElement>('.dim-hover');
+	if (existing) {
+		return existing;
+	}
+	const card = doc.createElement('div');
+	card.className = 'dim-hover';
+	card.setAttribute('role', 'tooltip');
+	card.hidden = true;
+	doc.body.appendChild(card);
+	return card;
+}
+
+/** Writes what the card says about one element. */
+function fillHoverCard(card: HTMLElement, info: DimHoverInfo, labels: DimHoverLabels): void {
+	const doc = card.ownerDocument;
+	const line = (className: string, text: string): HTMLElement => {
+		const el = doc.createElement('div');
+		el.className = className;
+		el.textContent = text;
+		return el;
+	};
+	card.replaceChildren(line('dim-hover-title', info.title));
+	const { link, change } = info;
+	if (link || change) {
+		const meta = doc.createElement('div');
+		meta.className = 'dim-hover-meta';
+		if (link) {
+			meta.appendChild(doc.createElement('span')).textContent = labels[link.kind];
+		}
+		if (change) {
+			const badge = meta.appendChild(doc.createElement('span'));
+			badge.className = 'dim-hover-change';
+			badge.dataset.change = change;
+			badge.textContent = labels[change];
+		}
+		card.appendChild(meta);
+	}
+	if (link?.detail) {
+		card.appendChild(line('dim-hover-detail', link.detail));
+	}
+	if (link?.file) {
+		const lines = link.line === undefined ? ''
+			: link.endLine !== undefined && link.endLine !== link.line ? labels.lines.replace('{0}', String(link.line)).replace('{1}', String(link.endLine))
+				: labels.line.replace('{0}', String(link.line));
+		card.appendChild(line('dim-hover-location', lines ? `${link.file}, ${lines}` : link.file));
+	}
+	if (info.opens) {
+		card.appendChild(line('dim-hover-hint', labels.open));
+	}
+}
+
+/** Shows the card below and to the right of the pointer, kept inside the window. */
+function placeHoverCard(card: HTMLElement, x: number, y: number): void {
+	const offset = 12;
+	card.style.left = '0px';
+	card.style.top = '0px';
+	card.hidden = false;
+	const { width, height } = card.getBoundingClientRect();
+	const view = card.ownerDocument.defaultView ?? window;
+	const left = x + offset + width > view.innerWidth ? Math.max(4, x - offset - width) : x + offset;
+	const top = y + offset + height > view.innerHeight ? Math.max(4, y - offset - height) : y + offset;
+	card.style.left = `${left}px`;
+	card.style.top = `${top}px`;
 }
 
 /**

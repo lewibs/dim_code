@@ -20,8 +20,8 @@ import { ISCMResourceGroup } from '../../scm/common/scm.js';
 
 /**
  * The record holding the big-picture diagram of every change waiting for review, in a
- * workspace folder's big-picture folder. Written by `generateDimChanges.sh`; keep the two
- * in sync.
+ * workspace folder's big-picture folder. Written by `generateDimChanges.sh` and cleared on
+ * commit by `dimDiff.ts` in the mermaid extension; keep the three in sync.
  */
 const CHANGES_RECORD_NAME = 'changes.dim';
 

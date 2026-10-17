@@ -4,8 +4,8 @@
 
 **Show:**
 - The participants that actually exchange messages — the real objects, services or modules involved, named from the code.
-- The calls between them in execution order, including the return values or responses that matter.
-- Branches and loops only when they are part of the story: `alt`/`else` for a real decision, `loop` for a genuine repetition.
+- Every call the drawn routine makes between those participants, in execution order, with the values each call returns. Don't skip calls that seem minor: a reader must be able to trust that the diagram shows everything the routine does with them.
+- Every branch and loop that decides which of those calls happen: `alt`/`else` for a decision (with all its cases), `opt` for a call that may not happen, `loop` for a repetition.
 
 **Mermaid essentials:**
 - Begin with `sequenceDiagram`.

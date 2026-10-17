@@ -121,6 +121,8 @@ export interface IDimLink {
 	readonly line?: number;
 	/** The last line of the range starting at {@link line}; just that line when omitted. */
 	readonly endLine?: number;
+	/** One sentence on what the element does, shown when the pointer rests on it. */
+	readonly detail?: string;
 }
 
 /** Keeps the well-formed entries of a diagram's raw `links` value. */
@@ -141,6 +143,7 @@ function parseLinks(raw: unknown): IDimLink[] {
 				view: dimLinkViews.includes(entry.view as DimLinkView) ? entry.view as DimLinkView : undefined,
 				line,
 				endLine: line !== undefined && endLine !== undefined && endLine >= line ? endLine : undefined,
+				detail: typeof entry.detail === 'string' && entry.detail.trim().length > 0 ? entry.detail.trim() : undefined,
 			});
 		}
 	}

@@ -5,7 +5,7 @@
 import mermaid, { MermaidConfig } from 'mermaid';
 import { buildMermaidConfig, createMermaidErrorElement, loadExtensionConfig, markVsCodeContextAsError, registerMermaidAddons } from '../shared';
 import { VsCodeMermaidThemeTracker } from '../shared/vsCodeTheme';
-import { DimChange, DimNavigate, enhanceDiagramClickability, markDiagramChanges } from './dimClickable';
+import { DimChange, DimHoverLabels, DimLink, DimNavigate, enhanceDiagramClickability, enhanceDiagramHovers, markDiagramChanges } from './dimClickable';
 import { roundDiagramBoxes, withDimDiagramLayout } from './dimDiagramStyle';
 import { VsCodeApi } from './vscodeApi';
 
@@ -446,7 +446,7 @@ async function rerenderMermaidDiagram(
  * switches between these by index via a `dimSelectDiagram` message. Returns an empty
  * array when the block is absent or malformed.
  */
-function readDimViews(): Array<{ mermaid?: string; text?: string; placeholder?: boolean; changes?: DimChange[]; isNew?: boolean }> {
+function readDimViews(): Array<{ mermaid?: string; text?: string; placeholder?: boolean; links?: DimLink[]; changes?: DimChange[]; isNew?: boolean }> {
 	const dataElement = document.getElementById('dim-views');
 	if (!dataElement) {
 		return [];
@@ -456,6 +456,22 @@ function readDimViews(): Array<{ mermaid?: string; text?: string; placeholder?: 
 		return Array.isArray(parsed) ? parsed : [];
 	} catch {
 		return [];
+	}
+}
+
+/**
+ * Reads the hover card's localized words from the `#dim-hover-labels` data block, which
+ * only the Dim editor's page has. Returns `undefined` when it is absent or malformed.
+ */
+function readDimHoverLabels(): DimHoverLabels | undefined {
+	const dataElement = document.getElementById('dim-hover-labels');
+	if (!dataElement) {
+		return undefined;
+	}
+	try {
+		return JSON.parse(dataElement.textContent ?? '');
+	} catch {
+		return undefined;
 	}
 }
 
@@ -687,14 +703,21 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	// current view once the page is ready) does not re-render it and reset pan/zoom.
 	let shownIndex = Number(document.body.dataset.dimIndex ?? 0);
 
-	// Rounds the rendered diagram's boxes, wires its click targets and colors the
-	// changes waiting for review, all on the SVG mermaid just rendered.
+	const hoverLabels = readDimHoverLabels();
+
+	// Rounds the rendered diagram's boxes, wires its click targets and hover cards, and
+	// colors the changes waiting for review, all on the SVG mermaid just rendered.
 	const enhanceDiagram = (): void => {
+		const views = readDimViews();
+		const shown = views[shownIndex];
 		if (clickable) {
 			roundDiagramBoxes(diagram);
 			enhanceDiagramClickability(diagram, navigate, () => panZoomHandler.didJustDrag());
+			if (hoverLabels) {
+				const otherLinks = views.filter(view => view !== shown).flatMap(view => view.links ?? []);
+				enhanceDiagramHovers(diagram, shown?.links ?? [], otherLinks, shown?.changes ?? [], !!shown?.isNew, hoverLabels);
+			}
 		}
-		const shown = readDimViews()[shownIndex];
 		markDiagramChanges(diagram, shown?.changes ?? [], !!shown?.isNew);
 	};
 

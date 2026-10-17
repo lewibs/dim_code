@@ -27,6 +27,12 @@ const recordsFolderName = '.dim';
 /** The folder of agent-written big-picture records, which describe no single file and carry no change marks. */
 const bigPictureFolder = 'big_picture';
 
+/**
+ * The big-picture record drawing every change waiting for review, written by
+ * `generateDimChanges.sh` (see `dimChanges.ts` in the workbench); keep the three in sync.
+ */
+const changesRecordName = 'changes.dim';
+
 /** The comment lines that wrap a removed element in a diagram's mermaid source. */
 const removedStart = '%% dim:removed';
 const removedEnd = '%% dim:end';
@@ -58,6 +64,9 @@ interface IGitResult {
  *   - otherwise the marks no longer describe the file's changes: they are dropped and the
  *     record is left stale, so the next generation run draws the changes afresh.
  *
+ * The changes diagram (see {@link clearChangesRecord}) is cleared instead once HEAD moves
+ * past the commit it was drawn on.
+ *
  * Node-only, like the generate command: a web extension host has no git to run.
  */
 export function registerDimDiffSync(): vscode.Disposable {
@@ -79,10 +88,36 @@ export function registerDimDiffSync(): vscode.Disposable {
 		if (!head) {
 			return; // not a repository, or no commit yet
 		}
-		for (const recordUri of await findRecords(vscode.Uri.parse(args.recordsUri))) {
+		const recordsUri = vscode.Uri.parse(args.recordsUri);
+		for (const recordUri of await findRecords(recordsUri)) {
 			await syncRecord(recordUri, folder, head, git);
 		}
+		await clearChangesRecord(vscode.Uri.joinPath(recordsUri, bigPictureFolder, changesRecordName), folder, head, git);
 	});
+}
+
+/**
+ * Clears the changes diagram once HEAD has moved past the commit it was drawn on (its
+ * `head`; one drawn before records were stamped counts as stale too): those changes were
+ * committed, so its diagrams no longer describe what waits for review. The record is
+ * rewritten without diagrams or a `changesHash`, so the next Open Changes Diagram draws
+ * the changes waiting for review afresh, and an open viewer of it redraws.
+ */
+async function clearChangesRecord(recordUri: vscode.Uri, folder: vscode.Uri, head: string, git: (cwd: string, args: readonly string[]) => Promise<IGitResult>): Promise<void> {
+	let record: { changesHash?: unknown; head?: unknown };
+	try {
+		record = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(recordUri)));
+	} catch {
+		return; // never drawn, or unreadable
+	}
+	if (typeof record.changesHash !== 'string' || record.head === head) {
+		return; // already cleared, or drawn on this commit
+	}
+	const status = await git(folder.fsPath, ['status', '--porcelain', '--', '.', ':(exclude).dim']);
+	const readme = status.code === 0 && status.stdout.trim().length === 0
+		? vscode.l10n.t("There are no changes waiting for review.")
+		: vscode.l10n.t("The changes this diagram showed were committed. Click Open Changes Diagram in Source Control to draw the changes waiting for review now.");
+	await vscode.workspace.fs.writeFile(recordUri, new TextEncoder().encode(JSON.stringify({ version: 1, readme, diagrams: [] }, undefined, '\t') + '\n'));
 }
 
 /** Every `.dim` record under the records folder, except the big-picture ones. */
