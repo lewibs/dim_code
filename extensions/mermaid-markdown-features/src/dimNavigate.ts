@@ -80,8 +80,9 @@ export interface IDimDestination {
 /**
  * Works out which Dim view a click in a diagram opens:
  * - an **attribute** opens a view focused on it, on its state diagram;
- * - a **function** or **class** defined in another file opens that file's view;
- *   one defined in the file being viewed opens a view focused on it;
+ * - a **function** or method opens a view focused on it, wherever it is defined;
+ * - a **class** defined in another file opens that file's view; one defined in the
+ *   file being viewed opens a view focused on it;
  * - a **file** (e.g. a module participant) opens that file's view;
  * - a sequence **message** that names no call (prose such as "spawn the generator")
  *   opens what its receiving participant stands for.
@@ -138,6 +139,9 @@ function destinationFor(sourceFile: vscode.Uri, resolved: IResolvedSymbol): IDim
 	}
 	if (kind === 'attribute') {
 		return { uri: formatDimFocus(file, kind, symbol), viewId: view ? viewId : 'stateDiagram' };
+	}
+	if (kind === 'function') {
+		return { uri: formatDimFocus(file, kind, symbol), viewId };
 	}
 	const sameFile = file.toString() === sourceFile.toString();
 	return sameFile ? { uri: formatDimFocus(file, kind, symbol), viewId } : { uri: file, viewId };

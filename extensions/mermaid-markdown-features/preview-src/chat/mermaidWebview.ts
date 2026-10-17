@@ -521,6 +521,47 @@ function updateDimStatusElapsed(): void {
 	elapsed.textContent = !banner.hidden && label && Number.isFinite(startedAt)
 		? label.replace('{0}', String(Math.max(0, Math.floor((Date.now() - startedAt) / 1000))))
 		: '';
+	const noticeElapsed = document.querySelector<HTMLElement>('.dim-updating-elapsed');
+	if (noticeElapsed) {
+		noticeElapsed.textContent = elapsed.textContent;
+	}
+}
+
+/**
+ * Mirrors the status onto the notice over the diagram surface, and marks the page so
+ * the shown diagram fades while it is redrawn. A running notice names the current step;
+ * a failed one gives the reason.
+ */
+function applyDimUpdatingNotice(status: DimStatusBanner | undefined): void {
+	if (status?.kind === 'running') {
+		document.body.dataset.dimStatus = 'running';
+	} else {
+		delete document.body.dataset.dimStatus;
+	}
+	const notice = document.querySelector<HTMLElement>('.dim-updating');
+	if (!notice) {
+		return;
+	}
+	notice.hidden = !status;
+	if (!status) {
+		return;
+	}
+	notice.dataset.kind = status.kind;
+	const icon = notice.querySelector<HTMLElement>('.codicon');
+	if (icon) {
+		icon.classList.remove(...dimStatusIconClasses.running, ...dimStatusIconClasses.failed);
+		icon.classList.add(...dimStatusIconClasses[status.kind]);
+	}
+	const message = notice.querySelector<HTMLElement>('.dim-updating-message');
+	if (message) {
+		message.textContent = status.message;
+	}
+	const step = notice.querySelector<HTMLElement>('.dim-updating-step');
+	if (step) {
+		step.textContent = status.kind === 'running'
+			? status.steps?.find(candidate => candidate.state === 'current')?.label ?? ''
+			: status.detail ?? '';
+	}
 }
 
 /**
@@ -529,6 +570,7 @@ function updateDimStatusElapsed(): void {
  * update while a diagram shows is visible as soon as the README is selected.
  */
 function applyDimStatus(status: DimStatusBanner | undefined): void {
+	applyDimUpdatingNotice(status);
 	const banner = document.querySelector<HTMLElement>('.dim-status');
 	if (!banner) {
 		return;
@@ -661,6 +703,11 @@ export async function initializeMermaidWebview(vscode: VsCodeApi, options?: PanZ
 	diagram.parentNode?.insertBefore(wrapper, diagram);
 	content.appendChild(diagram);
 	wrapper.appendChild(content);
+	// Put the status notice on the diagram surface, so it shows only while a diagram does.
+	const updatingNotice = document.querySelector<HTMLElement>('.dim-updating');
+	if (updatingNotice) {
+		wrapper.appendChild(updatingNotice);
+	}
 	// Hide the diagram surface right away when the README shows first, so nothing in
 	// the setup below can leave it covering the README.
 	if (startsOnReadme) {

@@ -10,6 +10,7 @@
 **Mermaid essentials:**
 - Begin with `classDiagram`.
 - Members: `+methodName(param: Type): ReturnType` and `+fieldName: Type`. Use `+` public, `-` private, `#` protected. Use the members' real identifiers, so each member row can be linked to its code.
+- Order each box's members by visibility: public first, then protected, then private, so a box leads with what the type offers. The viewer also sorts them this way.
 - Relationships: `A <|-- B` (B extends/implements A), `A *-- B` (composition), `A --> B` (association/uses), `A ..> B` (dependency). Label an edge with `A --> B : uses`.
 - Group standalone functions under a single class box named for the module when there is no real class.
 

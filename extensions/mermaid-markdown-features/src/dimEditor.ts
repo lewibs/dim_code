@@ -52,8 +52,8 @@ const openDimCommand = '_dim.openDim';
  * `fixing`, which only happens when the check finds a diagram that does not build and
  * is shown in the check's place (see {@link bannerStep}).
  */
-const generationSteps: readonly { readonly id: DimGenerationStep; readonly label: (current: DimGenerationStep) => string }[] = [
-	{ id: 'reading', label: () => vscode.l10n.t("Read the file and its imports") },
+const generationSteps: readonly { readonly id: DimGenerationStep; readonly label: (current: DimGenerationStep, changes: boolean) => string }[] = [
+	{ id: 'reading', label: (_current, changes) => changes ? vscode.l10n.t("Read the changes waiting for review") : vscode.l10n.t("Read the file and its imports") },
 	{ id: 'claude', label: () => vscode.l10n.t("Generating diagrams") },
 	{ id: 'checking', label: current => current === 'fixing' ? vscode.l10n.t("Fix the diagrams that do not build") : vscode.l10n.t("Check that the diagrams build") },
 	{ id: 'saving', label: () => vscode.l10n.t("Save the overview and diagrams") },
@@ -303,17 +303,29 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			const hasOverview = view.views.length > 0 && !view.views[0].placeholder;
 			// Before the generator announces its first step, show the first as current.
 			const current = Math.max(0, generationSteps.findIndex(step => step.id === bannerStep(state.step)));
+			// Only the changes diagram is generated under a big-picture record's URI.
+			const changes = isBigPictureRecord(vscode.Uri.parse(uri));
+			const message = changes
+				? vscode.l10n.t("Drawing the changes waiting for review…")
+				: hasOverview
+					? vscode.l10n.t("Updating the overview and diagrams for this file's latest changes…")
+					: vscode.l10n.t("Generating an overview and diagrams for this file…");
 			return {
 				kind: 'running',
-				message: hasOverview
-					? vscode.l10n.t("Updating the overview and diagrams for this file's latest changes…")
-					: vscode.l10n.t("Generating an overview and diagrams for this file…"),
+				message,
 				steps: generationSteps.map((step, index) => ({
-					label: step.label(state.step),
+					label: step.label(state.step, changes),
 					state: index < current ? 'done' : index === current ? 'current' : 'pending',
 				})),
 				startedAt: state.startedAt,
 				elapsedLabel: vscode.l10n.t("{0}s elapsed"),
+			};
+		}
+		if (isBigPictureRecord(vscode.Uri.parse(uri))) {
+			return {
+				kind: 'failed',
+				message: vscode.l10n.t("Couldn't draw the changes waiting for review."),
+				detail: vscode.l10n.t("{0} Click Open Changes Diagram in Source Control to try again.", state.message),
 			};
 		}
 		return {

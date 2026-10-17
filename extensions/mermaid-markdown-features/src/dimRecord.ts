@@ -175,11 +175,86 @@ function inferType(mermaid: string): string {
 	return 'flowchart';
 }
 
+/** Opens a class block, `class Name {` (also with generics, `class Name~T~ {`). */
+const classBlockStart = /^\s*class\s+\S.*\{\s*$/;
+
+/**
+ * Where a class block line sorts: annotations (`<<interface>>`) first, then public
+ * members (`+`, or no visibility), protected and package (`#`, `~`), and private (`-`).
+ */
+function memberRank(line: string): number {
+	const trimmed = line.trim();
+	if (trimmed.startsWith('<<')) {
+		return 0;
+	}
+	switch (trimmed[0]) {
+		case '#':
+		case '~':
+			return 2;
+		case '-':
+			return 3;
+		default:
+			return 1;
+	}
+}
+
+/**
+ * Orders the members of every class block in a class diagram public first and private
+ * last, keeping their order within each visibility, so a box leads with what the type
+ * offers. A removed pair (`%% dim:removed` … `%% dim:end`) moves as one with the member it
+ * wraps, and any other comment moves with the line after it.
+ */
+function orderClassMembers(mermaid: string): string {
+	const lines = mermaid.split('\n');
+	const result: string[] = [];
+	for (let index = 0; index < lines.length; index++) {
+		result.push(lines[index]);
+		if (!classBlockStart.test(lines[index])) {
+			continue;
+		}
+		// Gather the block's lines into units, each sorted by its first member line.
+		const units: { readonly lines: string[]; readonly rank: number }[] = [];
+		let pending: string[] = [];
+		let removed = false;
+		let removedRank: number | undefined; // the rank of the first member a removed pair wraps
+		for (index++; index < lines.length && (removed || lines[index].trim() !== '}'); index++) {
+			const line = lines[index];
+			const trimmed = line.trim();
+			pending.push(line);
+			if (trimmed === '%% dim:removed') {
+				removed = true;
+				removedRank = undefined;
+			} else if (trimmed === '%% dim:end') {
+				removed = false;
+				units.push({ lines: pending, rank: removedRank ?? 1 });
+				pending = [];
+			} else if (trimmed && !trimmed.startsWith('%%')) {
+				if (removed) {
+					removedRank ??= memberRank(line);
+				} else {
+					units.push({ lines: pending, rank: memberRank(line) });
+					pending = [];
+				}
+			}
+		}
+		const sorted = units.map((unit, order) => ({ unit, order })).sort((a, b) => a.unit.rank - b.unit.rank || a.order - b.order);
+		for (const { unit } of sorted) {
+			result.push(...unit.lines);
+		}
+		result.push(...pending);
+		if (index < lines.length) {
+			result.push(lines[index]); // the closing brace
+		}
+	}
+	return result.join('\n');
+}
+
 /**
  * Parses the contents of a `.dim` file into its list of diagrams. Accepts both the
  * JSON record container (`{ version, diagrams: [...] }`) and a legacy record whose
  * whole content is a single block of raw mermaid source, so older records keep
- * rendering.
+ * rendering. A class diagram's members are ordered public first (see
+ * {@link orderClassMembers}).
  *
  * @param content The raw text of the `.dim` file.
  */
@@ -198,7 +273,8 @@ export function parseDimRecord(content: string): IDimDiagramView[] {
 						// A type outside the catalog (e.g. `stateDiagram-v2`, the mermaid keyword
 						// rather than the catalog's) is read from the diagram's own keyword.
 						const type = d.type && knownTypes.includes(d.type) ? d.type : inferType(d.mermaid);
-						return { type, label: d.label || labelForType(type), mermaid: d.mermaid, links: parseLinks(d.links), changes: parseChanges(d.changes) };
+						const mermaid = type === 'classDiagram' ? orderClassMembers(d.mermaid) : d.mermaid;
+						return { type, label: d.label || labelForType(type), mermaid, links: parseLinks(d.links), changes: parseChanges(d.changes) };
 					});
 			}
 		} catch {

@@ -358,6 +358,14 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 						<div class="dim-status-elapsed">${escapeHtmlText(statusElapsed)}</div>
 					</div>
 				</div>`;
+	// The same status over a diagram view, which the webview moves onto the diagram surface.
+	// Rendered hidden: the webview shows it once it is in place.
+	const updatingNotice = `<div class="dim-updating" role="status" aria-live="polite" hidden>
+				<i class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></i>
+				<span class="dim-updating-message"></span>
+				<span class="dim-updating-step"></span>
+				<span class="dim-updating-elapsed"></span>
+			</div>`;
 
 	// Always in the Dim editor's page (only it reviews changes), so `dimReview` messages can
 	// show or hide it. Its buttons post `dimReview` messages back.
@@ -584,6 +592,65 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				}
 				.dim-status-detail:empty,
 				.dim-status-elapsed:empty {
+					display: none;
+				}
+				/* While a run redraws the diagrams, the shown one is out of date: fade it and
+				   say so on top of it. */
+				.mermaid-content {
+					transition: opacity 0.2s ease;
+				}
+				body[data-dim-status="running"] .mermaid-content {
+					opacity: 0.35;
+				}
+				.dim-updating {
+					position: absolute;
+					top: 50%;
+					left: 50%;
+					transform: translate(-50%, -50%);
+					z-index: 50;
+					display: flex;
+					flex-direction: column;
+					align-items: center;
+					gap: 4px;
+					max-width: min(420px, calc(100% - 32px));
+					padding: 12px 16px;
+					border-radius: 6px;
+					border: 1px solid var(--vscode-editorWidget-border, transparent);
+					background: var(--vscode-editorWidget-background);
+					color: var(--vscode-foreground);
+					box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+					font-family: var(--vscode-font-family);
+					font-size: var(--vscode-font-size);
+					text-align: center;
+					pointer-events: none;
+				}
+				.dim-updating[hidden] {
+					display: none;
+				}
+				.dim-updating[data-kind="failed"] {
+					top: 8px;
+					transform: translateX(-50%);
+					border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+					background: var(--vscode-inputValidation-errorBackground, var(--vscode-editorWidget-background));
+				}
+				.dim-updating[data-kind="failed"] .codicon {
+					color: var(--vscode-errorForeground);
+				}
+				.dim-updating .codicon {
+					font-size: 20px;
+				}
+				.dim-updating-message {
+					font-weight: 600;
+				}
+				.dim-updating-step,
+				.dim-updating-elapsed {
+					color: var(--vscode-descriptionForeground);
+				}
+				.dim-updating-elapsed {
+					font-variant-numeric: tabular-nums;
+				}
+				.dim-updating-step:empty,
+				.dim-updating-elapsed:empty {
 					display: none;
 				}
 				.zoom-controls {
@@ -906,6 +973,7 @@ export function getMermaidEditorHtml(webview: vscode.Webview, extensionUri: vsco
 				${usedBySection}
 				${testsSection}
 			</div>
+			${updatingNotice}
 			${reviewBar}
 			<script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 		</body>

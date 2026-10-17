@@ -81,12 +81,14 @@ class OpenDimChangesAction extends Action2 {
 		if (exists) {
 			await open();
 		}
-		// The generator shows its progress in the "Updating diagrams" pill (see dimUpdatingPill.ts).
+		// The generator shows its progress in the "Updating diagrams" pill (see dimUpdatingPill.ts)
+		// and, reported under the record the viewer is keyed by, over the open diagram itself.
 		await commandService.executeCommand(GENERATE_RECORD_COMMAND, {
 			scriptUri: DIM_CHANGES_GENERATOR_URI.toString(),
 			sourceUri: folder.uri.toString(),
 			recordUri: recordUri.toString(),
 			relPath: '',
+			statusUri: recordUri.toString(),
 		});
 		if (exists) {
 			return;

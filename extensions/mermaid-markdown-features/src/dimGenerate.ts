@@ -37,6 +37,12 @@ interface IDimGenerateArgs {
 	readonly focusKind?: string;
 	/** For a view focused on one symbol: the symbol, e.g. `Session.state`. */
 	readonly focusSymbol?: string;
+	/**
+	 * The URI the run's state is recorded under, which is what its viewer is keyed by;
+	 * `sourceUri` when omitted. The changes diagram describes the whole workspace folder,
+	 * so it reports under its record.
+	 */
+	readonly statusUri?: string;
 }
 
 /**
@@ -117,7 +123,7 @@ export function registerDimGenerate(extensionUri: vscode.Uri, status: DimGenerat
 		// dropped there, while the node bundle keeps it.
 		const nodeRequire: NodeRequire = require;
 		const { spawn } = nodeRequire('child_process') as typeof import('child_process');
-		const sourceKey = vscode.Uri.parse(args.sourceUri).toString();
+		const sourceKey = vscode.Uri.parse(args.statusUri ?? args.sourceUri).toString();
 		const scriptPath = vscode.Uri.parse(args.scriptUri).fsPath;
 		const sourcePath = vscode.Uri.parse(args.sourceUri).fsPath;
 		const recordPath = vscode.Uri.parse(args.recordUri).fsPath;

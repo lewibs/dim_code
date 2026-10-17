@@ -683,7 +683,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 		// Reopen the same resource with the default (text) editor override: the diagram
 		// viewer and text editor share one resource, so this reuses the tab in place. A
 		// view focused on one symbol drops its focus fragment: the raw view is the file,
-		// with the cursor on that symbol's declaration.
+		// scrolled to that symbol with its whole declaration selected.
 		const file = ref.sourceUri.with({ fragment: '' });
 		const focus = parseDimFocus(ref.sourceUri);
 		const declaration = focus && await this._findDeclaration(file, focus.symbol);
@@ -694,8 +694,8 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 				options: {
 					override: DEFAULT_EDITOR_ASSOCIATION.id,
 					pinned: true,
-					selection: declaration && { startLineNumber: declaration.startLineNumber, startColumn: declaration.startColumn },
-					selectionRevealType: TextEditorSelectionRevealType.CenterIfOutsideViewport,
+					selection: declaration,
+					selectionRevealType: TextEditorSelectionRevealType.NearTopIfOutsideViewport,
 				}
 			}
 		}], group);
@@ -706,7 +706,8 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 	 * matching its qualified name (`Owner.member`) before its last segment alone. Mirrors
 	 * `findDocumentSymbol` in the mermaid extension's `dimNavigate.ts`.
 	 *
-	 * @returns The range of the symbol's name, or `undefined` when the file has no such symbol.
+	 * @returns The range of the symbol's whole declaration (for a method, from its
+	 * signature to its closing brace), or `undefined` when the file has no such symbol.
 	 */
 	private async _findDeclaration(file: URI, symbol: string): Promise<IRange | undefined> {
 		try {
@@ -724,7 +725,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 				walk(outline.getTopLevelSymbols(), '');
 				const bare = symbol.slice(symbol.lastIndexOf('.') + 1);
 				const match = flat.find(entry => entry.qualified === symbol) ?? flat.find(entry => entry.symbol.name === bare);
-				return match?.symbol.selectionRange;
+				return match?.symbol.range;
 			} finally {
 				reference.dispose();
 			}
