@@ -1,11 +1,11 @@
 name: Dim Release
 
 # Builds Dim for macOS, Windows and Linux and attaches the installers to a GitHub Release
-# in the public lewibs/dim repo, so they download even though this repo is private.
+# in this repo.
 # Push a tag like v0.1.0 to publish. The landing page links to
 # releases/latest/download/<name>, so the asset names below must stay fixed.
 # The three builds save their files as run artifacts; the publish job then creates the
-# release. RELEASE_TOKEN is a fine-grained token with Contents read/write on lewibs/dim.
+# release, so a release only goes out when every build passes.
 
 on:
   push:
@@ -23,7 +23,7 @@ permissions:
 
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
-  RELEASE_REPO: lewibs/dim
+  RELEASE_REPO: ${{ github.repository }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   VSCODE_SKIP_PRELAUNCH: '1'
   ELECTRON_SKIP_BINARY_DOWNLOAD: 1
@@ -213,7 +213,7 @@ jobs:
     needs: [linux, macos, windows]
     runs-on: ubuntu-24.04
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v4
         with:
