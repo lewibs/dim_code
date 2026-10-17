@@ -29,13 +29,13 @@ Get the installer for your OS from the [landing page](https://lewibs.github.io/d
 
 | OS | File |
 | --- | --- |
-| macOS (Apple silicon) | `Dim-darwin-arm64.zip` |
+| macOS (Apple silicon) | `Dim-darwin-arm64.dmg` or `Dim-darwin-arm64.zip` |
 | Windows | `Dim-win32-x64-setup.exe` |
 | Linux | `Dim-linux-x64.tar.gz` or `Dim-linux-x64.deb` |
 
 The builds are not code signed yet:
 
-- **macOS:** move `Dim.app` to Applications, then run `xattr -cr /Applications/Dim.app`.
+- **macOS:** open the disk image and drag `Dim.app` to Applications, then run `xattr -cr /Applications/Dim.app`.
 - **Windows:** when SmartScreen appears, choose **More info → Run anyway**.
 
 ## Build from source
