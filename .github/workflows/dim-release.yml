@@ -1,0 +1,209 @@
+name: Dim Release
+
+# Builds Dim for macOS, Windows and Linux and attaches the installers to a GitHub Release.
+# Push a tag like v0.1.0 to publish. The landing page links to
+# releases/latest/download/<name>, so the asset names below must stay fixed.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and publish (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  VSCODE_SKIP_PRELAUNCH: '1'
+  ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+jobs:
+  create-release:
+    name: Create release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create draft release
+        run: |
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --title "Dim $TAG" --target "$GITHUB_SHA" \
+              --notes "Dim $TAG. The macOS and Windows builds are unsigned: on macOS run \`xattr -cr /Applications/Dim.app\` after moving it to Applications; on Windows choose More info → Run anyway."
+          fi
+
+  linux:
+    name: Linux x64
+    needs: create-release
+    runs-on: ubuntu-24.04
+    env:
+      VSCODE_ARCH: x64
+      npm_config_arch: x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          lfs: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install system packages
+        run: |
+          set -e
+          ./build/azure-pipelines/linux/apt-retry.sh sudo apt-get update
+          ./build/azure-pipelines/linux/apt-retry.sh sudo apt-get install -y pkg-config libxkbfile-dev libkrb5-dev fakeroot dpkg-dev
+
+      - name: Install build dependencies
+        working-directory: build
+        run: |
+          for i in {1..5}; do npm ci && break; [ $i -eq 5 ] && exit 1; echo "Retrying npm ci..."; done
+
+      - name: Install dependencies
+        run: |
+          set -e
+          source ./build/azure-pipelines/linux/setup-env.sh
+          for i in {1..5}; do npm ci && break; [ $i -eq 5 ] && exit 1; echo "Retrying npm ci..."; done
+
+      - name: Download built-in extensions
+        run: mkdir -p .build && node build/lib/builtInExtensions.ts
+
+      - name: Build
+        run: npm run gulp vscode-linux-x64-min
+
+      - name: Package tarball
+        run: tar -czf Dim-linux-x64.tar.gz -C .. VSCode-linux-x64
+
+      - name: Package .deb
+        id: deb
+        continue-on-error: true
+        run: |
+          set -e
+          npm run gulp vscode-linux-x64-prepare-deb
+          npm run gulp vscode-linux-x64-build-deb
+          cp .build/linux/deb/amd64/deb/*.deb Dim-linux-x64.deb
+
+      - name: Upload to release
+        run: gh release upload "$TAG" Dim-linux-x64.tar.gz $( [ -f Dim-linux-x64.deb ] && echo Dim-linux-x64.deb ) --clobber -R "$GITHUB_REPOSITORY"
+
+  macos:
+    name: macOS arm64
+    needs: create-release
+    runs-on: macos-15
+    env:
+      VSCODE_ARCH: arm64
+      npm_config_arch: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          lfs: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install build dependencies
+        working-directory: build
+        run: |
+          for i in {1..5}; do npm ci && break; [ $i -eq 5 ] && exit 1; echo "Retrying npm ci..."; done
+
+      - name: Install dependencies
+        run: |
+          set -e
+          python3 -m pip install --break-system-packages setuptools
+          for i in {1..5}; do npm ci && break; [ $i -eq 5 ] && exit 1; echo "Retrying npm ci..."; done
+
+      - name: Download built-in extensions
+        run: mkdir -p .build && node build/lib/builtInExtensions.ts
+
+      - name: Build
+        run: npm run gulp vscode-darwin-arm64-min
+
+      - name: Sign (ad hoc) and zip
+        run: |
+          set -e
+          cd ../VSCode-darwin-arm64
+          # Apple Silicon refuses to run unsigned code, so give the app an ad hoc signature.
+          codesign --force --deep --sign - Dim.app
+          ditto -c -k --sequesterRsrc --keepParent Dim.app "$GITHUB_WORKSPACE/Dim-darwin-arm64.zip"
+
+      - name: Upload to release
+        run: gh release upload "$TAG" Dim-darwin-arm64.zip --clobber -R "$GITHUB_REPOSITORY"
+
+  windows:
+    name: Windows x64
+    needs: create-release
+    runs-on: windows-2022
+    env:
+      VSCODE_ARCH: x64
+      npm_config_arch: x64
+      npm_config_foreground_scripts: 'true'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          lfs: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install build dependencies
+        working-directory: build
+        run: |
+          . ../build/azure-pipelines/win32/exec.ps1
+          $ErrorActionPreference = "Stop"
+          exec { npm ci }
+
+      - name: Install dependencies
+        run: |
+          . build/azure-pipelines/win32/exec.ps1
+          $ErrorActionPreference = "Stop"
+          # Patch Electron/v8 headers before native modules compile.
+          exec { node build/npm/preinstall.ts }
+          for ($i = 1; $i -le 5; $i++) {
+            try { exec { npm ci }; break }
+            catch { if ($i -eq 5) { throw }; Write-Host "Retrying npm ci..." }
+          }
+
+      - name: Download built-in extensions
+        run: |
+          mkdir .build -ea 0
+          node build/lib/builtInExtensions.ts
+
+      - name: Build
+        run: |
+          . build/azure-pipelines/win32/exec.ps1
+          $ErrorActionPreference = "Stop"
+          exec { npm run gulp vscode-win32-x64-min }
+          exec { npm run gulp vscode-win32-x64-inno-updater }
+
+      - name: Package installer and zip
+        run: |
+          . build/azure-pipelines/win32/exec.ps1
+          $ErrorActionPreference = "Stop"
+          exec { npm run gulp vscode-win32-x64-user-setup }
+          Copy-Item (Get-ChildItem .build/win32-x64/user-setup/*.exe | Select-Object -First 1).FullName Dim-win32-x64-setup.exe
+          Compress-Archive -Path ../VSCode-win32-x64/* -DestinationPath Dim-win32-x64.zip
+
+      - name: Upload to release
+        run: gh release upload "$env:TAG" Dim-win32-x64-setup.exe Dim-win32-x64.zip --clobber -R "$env:GITHUB_REPOSITORY"
+
+  publish:
+    name: Publish release
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Mark release as latest
+        run: gh release edit "$TAG" --draft=false --latest -R "$GITHUB_REPOSITORY"
