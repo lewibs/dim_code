@@ -480,18 +480,20 @@ export function packageCopilotExtensionStream(): Stream {
 	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
 
 	// .moduleignore strips @github/copilot from the app's node_modules, but the
-	// extension's own copy holds the SDK it loads at runtime, so it skips the
-	// clean. prepareBuiltInCopilotRipgrepShim prunes its non-target platforms later.
-	const copilotSdkPackage = 'extensions/copilot/node_modules/@github/copilot/**';
+	// extension's own copy holds the SDK it loads at runtime, so its sdk and tgrep
+	// folders skip the clean. The rest of the package (clipboard, pvrecorder, ...)
+	// carries natives for every platform and stays stripped.
+	// prepareBuiltInCopilotRipgrepShim prunes the kept folders' non-target platforms later.
+	const copilotPackage = 'extensions/copilot/node_modules/@github/copilot';
+	const copilotSdkFiles = ['package.json', 'LICENSE.md', 'sdk/**', 'tgrep/**'].map(f => `${copilotPackage}/${f}`);
 
 	return es.merge(
 		localExtensionsStream,
 		gulp.src(dependenciesSrc, { base: '.' })
-			.pipe(filter(['**', `!${copilotSdkPackage}`]))
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`))),
 		gulp.src(dependenciesSrc, { base: '.' })
-			.pipe(filter([copilotSdkPackage]))
+			.pipe(filter(copilotSdkFiles))
 	).pipe(util2.setExecutableBit(['**/*.sh']));
 }
 
