@@ -3,22 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import './media/dimUpdatingPill.css';
-import { $, append } from '../../../../base/browser/dom.js';
-import { getOrCreateAnchorName } from '../../../../base/browser/overlayLayoutElement.js';
-import { mainWindow } from '../../../../base/browser/window.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
-import { Codicon } from '../../../../base/common/codicons.js';
-import { Disposable, DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { joinPath } from '../../../../base/common/resources.js';
-import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { dimHookStorageDir } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
-import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
+import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 
 /**
  * The folder, inside a workspace's records folder, where each running Dim Stop hook keeps a
@@ -29,8 +23,8 @@ import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser
 const UPDATING_FOLDER_NAME = '.updating';
 
 /**
- * How long a run must last before the pill shows. Most Stop hooks find every record up to
- * date within a moment, and the pill should not flash for those.
+ * How long a run must last before the status bar entry shows. Most Stop hooks find every
+ * record up to date within a moment, and the entry should not flash for those.
  */
 const SHOW_DELAY = 500;
 
@@ -50,36 +44,26 @@ interface IDimUpdateProgress {
 }
 
 /**
- * Floats an "Updating diagrams" pill at the top right of the editor area while the Dim
- * Stop hook regenerates the diagrams of the files an agent changed, so the user can see
- * the work happening in the background (it otherwise runs detached and silent).
+ * Shows "Updating diagrams" in the status bar while the Dim Stop hook regenerates the
+ * diagrams of the files an agent changed, so the user can see the work happening in the
+ * background (it otherwise runs detached and silent).
  */
-class DimUpdatingPillContribution extends Disposable implements IWorkbenchContribution {
+class DimUpdatingStatusContribution extends Disposable implements IWorkbenchContribution {
 
-	static readonly ID = 'workbench.contrib.dimUpdatingPill';
+	static readonly ID = 'workbench.contrib.dimUpdatingStatus';
 
 	private readonly _watchers = this._register(new DisposableMap<string, DisposableStore>());
 	private readonly _rescan = this._register(new RunOnceScheduler(() => this._scan(), RESCAN_DELAY));
-	private readonly _show = this._register(new RunOnceScheduler(() => this._setVisible(true), SHOW_DELAY));
-	private readonly _pill: HTMLElement;
-	private readonly _label: HTMLElement;
+	private readonly _show = this._register(new RunOnceScheduler(() => this._showEntry(), SHOW_DELAY));
+	private readonly _entry = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
+	private _progress: IDimUpdateProgress = { done: 0, total: 0 };
 
 	constructor(
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly _contextService: IWorkspaceContextService,
-		@IWorkbenchLayoutService private readonly _layoutService: IWorkbenchLayoutService,
+		@IStatusbarService private readonly _statusbarService: IStatusbarService,
 	) {
 		super();
-
-		this._pill = $('.dim-updating-pill');
-		this._pill.setAttribute('role', 'status');
-		append(this._pill, $(`span${ThemeIcon.asCSSSelector(ThemeIcon.modify(Codicon.loading, 'spin'))}`));
-		this._label = append(this._pill, $('span.dim-updating-pill-label'));
-		// Diagrams are webviews, which float in their own layer above the editor area (see
-		// OverlayLayoutElement). Mount the pill in that same top-level container, above them,
-		// and pin it to the editor area with CSS anchor positioning.
-		this._layoutService.getContainer(mainWindow).appendChild(this._pill);
-		this._register({ dispose: () => this._pill.remove() });
 
 		this._register(this._contextService.onDidChangeWorkspaceFolders(e => {
 			for (const folder of e.removed) {
@@ -109,7 +93,7 @@ class DimUpdatingPillContribution extends Disposable implements IWorkbenchContri
 		return joinPath(dimHookStorageDir(folder), UPDATING_FOLDER_NAME);
 	}
 
-	/** Reads every running hook's status file and updates the pill to match. */
+	/** Reads every running hook's status file and updates the entry to match. */
 	private async _scan(): Promise<void> {
 		let done = 0;
 		let total = 0;
@@ -143,26 +127,32 @@ class DimUpdatingPillContribution extends Disposable implements IWorkbenchContri
 	}
 
 	private _update(progress: IDimUpdateProgress): void {
+		this._progress = progress;
 		if (progress.total === 0) {
 			this._show.cancel();
-			this._setVisible(false);
+			this._entry.clear();
 			return;
 		}
-		this._label.textContent = localize('dimUpdatingDiagrams', "Updating diagrams {0}/{1}", progress.done, progress.total);
-		if (!this._pill.classList.contains('visible') && !this._show.isScheduled()) {
+		if (this._entry.value) {
+			this._entry.value.update(this._entryProps());
+		} else if (!this._show.isScheduled()) {
 			this._show.schedule();
 		}
 	}
 
-	private _setVisible(visible: boolean): void {
-		if (visible) {
-			const editorPart = this._layoutService.getContainer(mainWindow, Parts.EDITOR_PART);
-			if (editorPart) {
-				this._pill.style.setProperty('position-anchor', getOrCreateAnchorName(editorPart));
-			}
-		}
-		this._pill.classList.toggle('visible', visible);
+	private _showEntry(): void {
+		this._entry.value = this._statusbarService.addEntry(this._entryProps(), DimUpdatingStatusContribution.ID, StatusbarAlignment.LEFT, -Number.MAX_VALUE);
+	}
+
+	private _entryProps(): IStatusbarEntry {
+		const label = localize('dimUpdatingDiagrams', "Updating diagrams {0}/{1}", this._progress.done, this._progress.total);
+		return {
+			name: localize('dimUpdatingDiagramsName', "Dim Diagram Updates"),
+			text: `$(loading~spin) ${label}`,
+			ariaLabel: label,
+			tooltip: localize('dimUpdatingDiagramsTooltip', "Dim is redrawing the diagrams of the files the agent changed."),
+		};
 	}
 }
 
-registerWorkbenchContribution2(DimUpdatingPillContribution.ID, DimUpdatingPillContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(DimUpdatingStatusContribution.ID, DimUpdatingStatusContribution, WorkbenchPhase.AfterRestored);

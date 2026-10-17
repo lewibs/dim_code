@@ -11,7 +11,7 @@ import { generateUuid } from '../common/uuid.js';
  * If the element already has an `anchor-name` style, return it.
  * Otherwise generate a fresh `--overlay-anchor-<uuid>` name, assign it, and return it.
  */
-export function getOrCreateAnchorName(element: HTMLElement): string {
+function getOrCreateAnchorName(element: HTMLElement): string {
 	const existing = element.style.getPropertyValue('anchor-name');
 	if (existing) {
 		return existing;

@@ -88,8 +88,8 @@ if [ -z "$claudeBin" ]; then
 fi
 
 # While Claude draws, keep a status file in the records folder's ".updating" folder, so the
-# editor shows its "Updating diagrams" pill: one item, done when this script exits. The
-# format is the Stop hook's (see updateDimHook.sh and `dimUpdatingPill.ts`).
+# editor shows its "Updating diagrams" status bar entry: one item, done when this script exits. The
+# format is the Stop hook's (see updateDimHook.sh and `dimUpdatingStatus.ts`).
 statusDir="$(dirname "$(dirname "$OUT")")/.updating"
 mkdir -p "$statusDir"
 status="$statusDir/$$"

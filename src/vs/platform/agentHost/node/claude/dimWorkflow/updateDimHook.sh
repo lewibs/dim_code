@@ -86,9 +86,9 @@ if [ -z "$files" ]; then
 fi
 
 # While this run lasts it keeps a status file, "$DIM_DIM_DIR/.updating/<pid>", that the
-# editor watches to show its "Updating diagrams" pill: the first line is the number of
+# editor watches to show its "Updating diagrams" status bar entry: the first line is the number of
 # files to check and each finished file appends a line. A status file left behind by a
-# run that was killed is removed here. Mirrored by `dimUpdatingPill.ts`; keep the two in
+# run that was killed is removed here. Mirrored by `dimUpdatingStatus.ts`; keep the two in
 # sync.
 statusDir="$DIM_DIM_DIR/.updating"
 mkdir -p "$statusDir"
