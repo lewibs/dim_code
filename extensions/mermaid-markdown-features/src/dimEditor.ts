@@ -8,7 +8,7 @@ import { DimGenerationStatus, DimGenerationStep } from './dimGenerate';
 import { dimFocusSymbol, IDimNavigateTarget, resolveDimNavigation } from './dimNavigate';
 import { IDimChange, IDimLink, IDimTestCase, parseDimDiff, parseDimReadme, parseDimRecord, parseDimTests } from './dimRecord';
 import { findDimUsers, IDimUser } from './dimUsedBy';
-import { acceptAllCommand, hasPendingChanges, rejectAllCommand } from './dimReview';
+import { acceptAllCommand, gitIndexFile, hasPendingChanges, rejectAllCommand } from './dimReview';
 import { Disposable } from './util/dispose';
 import { generateUuid } from './util/uuid';
 import { MermaidWebviewManager } from './webviewManager';
@@ -240,11 +240,21 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 			const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(dir, base));
 			disposables.push(watcher, watcher.onDidChange(() => view.render()), watcher.onDidCreate(() => view.render()));
 		}
+		let disposed = false;
 		// Edits to the file itself change what waits for review.
 		if (sourceFile) {
 			const sourceName = sourceFile.path.substring(sourceFile.path.lastIndexOf('/') + 1);
 			const sourceWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(sourceFile, '..'), sourceName));
 			disposables.push(sourceWatcher, sourceWatcher.onDidChange(updateReview), sourceWatcher.onDidCreate(updateReview), sourceWatcher.onDidDelete(updateReview));
+			// So does staging or committing (Accept All in another view, the Source Control
+			// view, git itself), which changes only git's index.
+			void gitIndexFile(sourceFile).then(index => {
+				if (!index || disposed) {
+					return;
+				}
+				const indexWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(index, '..'), 'index'));
+				disposables.push(indexWatcher, indexWatcher.onDidChange(updateReview), indexWatcher.onDidCreate(updateReview), indexWatcher.onDidDelete(updateReview));
+			});
 		}
 
 		disposables.push(webviewPanel.onDidChangeViewState(e => {
@@ -254,6 +264,7 @@ export class DimEditorProvider extends Disposable implements vscode.CustomReadon
 		}));
 
 		webviewPanel.onDidDispose(() => {
+			disposed = true;
 			if (this._views.get(key) === view) {
 				this._views.delete(key);
 			}

@@ -85,6 +85,18 @@ export async function hasPendingChanges(file: vscode.Uri): Promise<boolean> {
 }
 
 /**
+ * Git's index (the staged versions) for the repository a file is in, or `undefined` outside
+ * a git repository. Staging or committing changes it without touching the file, so watching
+ * it keeps track of whether the file still has changes waiting for review.
+ */
+export async function gitIndexFile(file: vscode.Uri): Promise<vscode.Uri | undefined> {
+	const { cwd } = location(file);
+	const index = await git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+	const path = index.stdout.trim();
+	return index.code === 0 && path ? vscode.Uri.file(path) : undefined;
+}
+
+/**
  * The files under `cwd` with changes waiting for review, relative to it, or `undefined` when
  * it is not in a git repository.
  */
