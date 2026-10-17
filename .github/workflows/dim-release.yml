@@ -120,25 +120,18 @@ jobs:
       - name: Build
         run: npm run gulp vscode-darwin-arm64-min
 
-      - name: Sign (ad hoc), zip and make the disk image
+      - name: Sign (ad hoc) and zip
         run: |
           set -e
           cd ../VSCode-darwin-arm64
           # Apple Silicon refuses to run unsigned code, so give the app an ad hoc signature.
           codesign --force --deep --sign - Dim.app
           ditto -c -k --sequesterRsrc --keepParent Dim.app "$GITHUB_WORKSPACE/Dim-darwin-arm64.zip"
-          # The disk image opens on Dim.app next to an Applications shortcut to drag it onto.
-          mkdir dmg
-          ditto Dim.app dmg/Dim.app
-          ln -s /Applications dmg/Applications
-          hdiutil create -volname Dim -srcfolder dmg -fs HFS+ -format UDZO -ov "$GITHUB_WORKSPACE/Dim-darwin-arm64.dmg"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dim-darwin-arm64
-          path: |
-            Dim-darwin-arm64.dmg
-            Dim-darwin-arm64.zip
+          path: Dim-darwin-arm64.zip
           if-no-files-found: error
 
   windows:
