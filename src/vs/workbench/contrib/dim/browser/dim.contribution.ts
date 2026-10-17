@@ -38,6 +38,7 @@ import { IEditorGroupsService } from '../../../services/editor/common/editorGrou
 import { CustomEditorInput } from '../../customEditor/browser/customEditorInput.js';
 import { customEditorViewOptions } from '../../customEditor/common/customEditorView.js';
 import { IDimPendingEditsService } from './dimPendingEdits.js';
+import './dimChanges.js';
 import './dimUpdatingPill.js';
 
 /**

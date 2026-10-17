@@ -23,7 +23,8 @@ import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser
 /**
  * The folder, inside a workspace's records folder, where each running Dim Stop hook keeps a
  * status file named by its process id: the first line is the number of files it checks and
- * each finished file appends a line. Written by `updateDimHook.sh`; keep the two in sync.
+ * each finished file appends a line. Written by `updateDimHook.sh` and, for the changes
+ * diagram, `generateDimChanges.sh`; keep the three in sync.
  */
 const UPDATING_FOLDER_NAME = '.updating';
 
