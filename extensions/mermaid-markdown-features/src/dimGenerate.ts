@@ -43,6 +43,11 @@ interface IDimGenerateArgs {
 	 * so it reports under its record.
 	 */
 	readonly statusUri?: string;
+	/**
+	 * The user's start command for Claude (the `dim.startCommand` setting, without Dim's
+	 * plugin folder), which the generator runs Claude through. Plain `claude` when omitted.
+	 */
+	readonly startCommand?: string;
 }
 
 /**
@@ -160,6 +165,7 @@ export function registerDimGenerate(extensionUri: vscode.Uri, status: DimGenerat
 			DIM_NODE: process.execPath,
 			ELECTRON_RUN_AS_NODE: '1',
 			DIM_MERMAID_DIR: vscode.Uri.joinPath(extensionUri, 'node_modules').fsPath,
+			DIM_START_COMMAND: args.startCommand ?? '',
 		};
 		const child = spawn('/bin/sh', [scriptPath, sourcePath, recordPath, args.relPath, ...focusArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] });
 		child.stdout?.on('data', (chunk: Buffer) => {

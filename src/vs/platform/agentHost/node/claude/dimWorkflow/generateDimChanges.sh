@@ -78,14 +78,19 @@ if [ -f "$OUT" ] && grep -q "\"changesHash\": \"$changesHash\"" "$OUT"; then
 	exit 0
 fi
 
-claudeBin=$(command -v claude 2>/dev/null)
-if [ -z "$claudeBin" ] && [ -x "$HOME/.local/bin/claude" ]; then
-	claudeBin="$HOME/.local/bin/claude"
-fi
-if [ -z "$claudeBin" ]; then
+# Run Claude through the user's start command (the `dim.startCommand` setting), handed
+# over as DIM_START_COMMAND without Dim's plugin folder, so this run does not fire Dim's
+# own hooks. runClaude's arguments are added to the end of its last line. Without one,
+# run the Claude CLI directly. Either is normally on PATH; also look in the per-user
+# install location in case the hook runs with a minimal desktop-launch environment.
+PATH="$PATH:$HOME/.local/bin"
+if [ -z "$DIM_START_COMMAND" ] && ! command -v claude >/dev/null 2>&1; then
 	echo "generateDimChanges: claude CLI not found."
 	exit 3
 fi
+runClaude() {
+	sh -c "${DIM_START_COMMAND:-claude} \"\$@\"" claude "$@"
+}
 
 # While Claude draws, keep a status file in the records folder's ".updating" folder, so the
 # editor shows its "Updating diagrams" status bar entry: one item, done when this script exits. The
@@ -159,7 +164,7 @@ echo "DIM_PROGRESS claude"
 
 model="${DIM_CHANGES_MODEL:-sonnet}"
 errFile="$OUT.err.$$"
-result=$(printf '%s' "$prompt" | "$claudeBin" -p --model "$model" --allowedTools Read Grep Glob 2>"$errFile")
+result=$(printf '%s' "$prompt" | runClaude -p --model "$model" --allowedTools Read Grep Glob 2>"$errFile")
 claudeStatus=$?
 claudeError=$(head -c 500 "$errFile" 2>/dev/null)
 rm -f "$errFile"

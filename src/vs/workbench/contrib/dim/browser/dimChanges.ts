@@ -10,6 +10,7 @@ import { localize, localize2 } from '../../../../nls.js';
 import { DIM_EDITOR_VIEW_TYPE, dimBigPictureDir } from '../../../../platform/agentHost/common/dimHookStorage.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
@@ -17,6 +18,7 @@ import { INotificationService } from '../../../../platform/notification/common/n
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ISCMResourceGroup } from '../../scm/common/scm.js';
+import { getHeadlessClaudeStartCommand } from '../../claudeTerminal/common/claudeStartCommand.js';
 
 /**
  * The record holding the big-picture diagram of every change waiting for review, in a
@@ -66,6 +68,7 @@ class OpenDimChangesAction extends Action2 {
 		const editorService = accessor.get(IEditorService);
 		const commandService = accessor.get(ICommandService);
 		const notificationService = accessor.get(INotificationService);
+		const configurationService = accessor.get(IConfigurationService);
 
 		// The repository's workspace folder, or the first one when run from the palette.
 		const rootUri = group?.provider.rootUri;
@@ -89,6 +92,7 @@ class OpenDimChangesAction extends Action2 {
 			recordUri: recordUri.toString(),
 			relPath: '',
 			statusUri: recordUri.toString(),
+			startCommand: getHeadlessClaudeStartCommand(configurationService),
 		});
 		if (exists) {
 			return;

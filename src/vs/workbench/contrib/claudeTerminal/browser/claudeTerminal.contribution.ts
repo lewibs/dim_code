@@ -33,6 +33,7 @@ import { ViewPane, IViewPaneOptions } from '../../../browser/parts/views/viewPan
 import { ViewPaneContainer } from '../../../browser/parts/views/viewPaneContainer.js';
 import { IViewContainersRegistry, IViewDescriptor, IViewDescriptorService, IViewsRegistry, ViewContainer, ViewContainerLocation, Extensions as ViewExtensions } from '../../../common/views.js';
 import { ITerminalInstance, ITerminalService } from '../../terminal/browser/terminal.js';
+import { CLAUDE_DEFAULT_START_COMMAND, CLAUDE_START_COMMAND_ENV, CLAUDE_START_COMMAND_PLUGIN_DIR_VARIABLE, CLAUDE_START_COMMAND_SETTING, getClaudeStartCommand, getHeadlessClaudeStartCommand, resolveClaudeStartCommand } from '../common/claudeStartCommand.js';
 
 // --- Dim: Claude Code terminal (default secondary side bar content) ---
 //
@@ -45,15 +46,7 @@ import { ITerminalInstance, ITerminalService } from '../../terminal/browser/term
 export const CLAUDE_TERMINAL_VIEW_CONTAINER_ID = 'workbench.view.claudeTerminal';
 export const CLAUDE_TERMINAL_VIEW_ID = 'workbench.view.claudeTerminal.view';
 
-/**
- * The command the Claude Code terminal runs when its session starts. `${pluginDir}`
- * stands for Dim's built-in plugin folder (skills and hooks), quoted for the shell.
- */
-const CLAUDE_TERMINAL_START_COMMAND_SETTING = 'dim.startCommand';
-const CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE = '${pluginDir}';
-const CLAUDE_TERMINAL_DEFAULT_START_COMMAND = `claude --plugin-dir ${CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE}`;
-
-/** Resets {@link CLAUDE_TERMINAL_START_COMMAND_SETTING} to its default; linked from the setting's description. */
+/** Resets {@link CLAUDE_START_COMMAND_SETTING} to its default; linked from the setting's description. */
 const CLAUDE_TERMINAL_RESET_START_COMMAND_ID = 'dim.resetStartCommand';
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
@@ -61,35 +54,19 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	title: localize('dimConfigurationTitle', "Dim"),
 	type: 'object',
 	properties: {
-		[CLAUDE_TERMINAL_START_COMMAND_SETTING]: {
+		[CLAUDE_START_COMMAND_SETTING]: {
 			type: 'string',
-			default: CLAUDE_TERMINAL_DEFAULT_START_COMMAND,
+			default: CLAUDE_DEFAULT_START_COMMAND,
 			editPresentation: EditPresentationTypes.Multiline,
 			// Runs in a shell, so only the user may set it, never a workspace.
 			scope: ConfigurationScope.APPLICATION,
-			markdownDescription: localize('dim.startCommand', "The command the Claude Code terminal runs to start its session. `{0}` is replaced with the folder of Dim's built-in skills and hooks; leave `--plugin-dir {0}` in to keep them. Each line runs in order. Takes effect the next time the session starts. [Reset to Default](command:{1})", CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE, CLAUDE_TERMINAL_RESET_START_COMMAND_ID),
+			markdownDescription: localize('dim.startCommand', "The command that starts Claude: the Claude Code terminal's session, and the runs that draw diagrams. `{0}` is replaced with the folder of Dim's built-in skills and hooks; leave `--plugin-dir {0}` in to keep them. Each line runs in order. Diagram runs leave out `--plugin-dir {0}` and add their own arguments to the end of the last line, so it must start Claude. The terminal picks up a change the next time its session starts. [Reset to Default](command:{1})", CLAUDE_START_COMMAND_PLUGIN_DIR_VARIABLE, CLAUDE_TERMINAL_RESET_START_COMMAND_ID),
 		},
 	},
 });
 
 CommandsRegistry.registerCommand(CLAUDE_TERMINAL_RESET_START_COMMAND_ID, accessor =>
-	accessor.get(IConfigurationService).updateValue(CLAUDE_TERMINAL_START_COMMAND_SETTING, undefined, ConfigurationTarget.USER));
-
-/**
- * Builds the shell command that starts the Claude session from the user's start command,
- * filling in `${pluginDir}` with the quoted plugin folder. Without a plugin folder the
- * `--plugin-dir ${pluginDir}` argument is dropped, so the command still runs.
- *
- * @param startCommand The configured start command.
- * @param pluginRoot Dim's built-in plugin folder, if it could be written.
- */
-function resolveStartCommand(startCommand: string, pluginRoot: URI | undefined): string {
-	if (!pluginRoot) {
-		return startCommand.split(` --plugin-dir ${CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE}`).join('').split(CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE).join('');
-	}
-	const quoted = `'${pluginRoot.fsPath.replace(/'/g, `'\\''`)}'`;
-	return startCommand.split(CLAUDE_TERMINAL_PLUGIN_DIR_VARIABLE).join(quoted);
-}
+	accessor.get(IConfigurationService).updateValue(CLAUDE_START_COMMAND_SETTING, undefined, ConfigurationTarget.USER));
 
 const claudeTerminalIcon = registerIcon('claude-terminal-view-icon', Codicon.terminal, localize('claudeTerminalViewIcon', 'View icon of the Claude Code terminal view.'));
 
@@ -149,6 +126,9 @@ class ClaudeTerminalViewPane extends ViewPane {
 				config: {
 					name: localize('claudeTerminal.name', "Claude Code"),
 					hideFromUser: true,
+					// The session's Stop hook draws diagrams with headless Claude runs, which go
+					// through the same start command.
+					env: { [CLAUDE_START_COMMAND_ENV]: getHeadlessClaudeStartCommand(this.configurationService) },
 				},
 				location: TerminalLocation.Panel,
 			});
@@ -167,8 +147,7 @@ class ClaudeTerminalViewPane extends ViewPane {
 			// skills and agent hook via a bundled plugin so they apply automatically
 			// in every workspace with no dependency on `~/.claude` or a project `.claude/`.
 			const pluginRoot = await this._ensureBuiltinPlugin();
-			const startCommand = this.configurationService.getValue<string>(CLAUDE_TERMINAL_START_COMMAND_SETTING)?.trim() || CLAUDE_TERMINAL_DEFAULT_START_COMMAND;
-			await instance.sendText(resolveStartCommand(startCommand, pluginRoot), true);
+			await instance.sendText(resolveClaudeStartCommand(getClaudeStartCommand(this.configurationService), pluginRoot), true);
 		} finally {
 			this._creating = false;
 		}

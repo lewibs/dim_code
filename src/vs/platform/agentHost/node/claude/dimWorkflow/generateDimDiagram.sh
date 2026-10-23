@@ -208,17 +208,20 @@ DIM_RECORD
 	echo "generateDimDiagram: wrote empty record (raw view) for $REL"
 }
 
-# Locate the Claude CLI. It is normally on PATH; also try the per-user install
-# location in case the hook runs with a minimal desktop-launch environment.
-claudeBin=$(command -v claude 2>/dev/null)
-if [ -z "$claudeBin" ] && [ -x "$HOME/.local/bin/claude" ]; then
-	claudeBin="$HOME/.local/bin/claude"
-fi
-if [ -z "$claudeBin" ]; then
+# Run Claude through the user's start command (the `dim.startCommand` setting), handed
+# over as DIM_START_COMMAND without Dim's plugin folder, so this run does not fire Dim's
+# own hooks. runClaude's arguments are added to the end of its last line. Without one,
+# run the Claude CLI directly. Either is normally on PATH; also look in the per-user
+# install location in case the hook runs with a minimal desktop-launch environment.
+PATH="$PATH:$HOME/.local/bin"
+if [ -z "$DIM_START_COMMAND" ] && ! command -v claude >/dev/null 2>&1; then
 	echo "generateDimDiagram: claude CLI not found; leaving $REL as raw."
 	[ -f "$OUT" ] || writeEmptyRecord
 	exit 3
 fi
+runClaude() {
+	sh -c "${DIM_START_COMMAND:-claude} \"\$@\"" claude "$@"
+}
 
 # Reports the step now starting (see the header); the step names are a contract with
 # `dimGenerate.ts`.
@@ -454,7 +457,7 @@ progress claude
 # No time limit: Claude runs until it answers or fails, and the editor shows progress
 # meanwhile. Keep Claude's stderr (rather than discarding it) so a failure can say why.
 errFile="$OUT.err.$$"
-result=$(printf '%s' "$prompt" | "$claudeBin" -p --model haiku 2>"$errFile")
+result=$(printf '%s' "$prompt" | runClaude -p --model haiku 2>"$errFile")
 claudeStatus=$?
 claudeError=$(head -c 500 "$errFile" 2>/dev/null)
 rm -f "$errFile"
@@ -527,7 +530,7 @@ ${checkErrors}
 Output the whole JSON object again, following every rule above, with these errors fixed. Keep everything that was already correct. Output ONLY the JSON object.
 FIX_PROMPT
 )
-		fixed=$(printf '%s' "$fixPrompt" | "$claudeBin" -p --model haiku 2>/dev/null)
+		fixed=$(printf '%s' "$fixPrompt" | runClaude -p --model haiku 2>/dev/null)
 		if [ $? -eq 0 ]; then
 			fixed=$(printf '%s\n' "$fixed" | sed '/^[[:space:]]*```/d' | sed '/./,$!d')
 			checkReply "$fixed"

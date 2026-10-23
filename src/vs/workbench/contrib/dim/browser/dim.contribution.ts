@@ -19,6 +19,7 @@ import { ITextModelService } from '../../../../editor/common/services/resolverSe
 import { IOutlineModelService } from '../../../../editor/contrib/documentSymbols/browser/outlineModel.js';
 import { DimDiagramType, dimDiagramTypes } from '../../../../platform/agentHost/common/dimDiagramTypes.js';
 import { DIM_EDITOR_VIEW_TYPE, dimHookStorageDir, IDimDiagram, isDimBigPictureRecord, isDimCodeFile, parseDimFocus, parseDimRecord, seedDimRecord, syncDimRecordsGitignore } from '../../../../platform/agentHost/common/dimHookStorage.js';
+import { getHeadlessClaudeStartCommand } from '../../claudeTerminal/common/claudeStartCommand.js';
 import { MenuId, MenuRegistry } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -439,6 +440,7 @@ class DimDiagramViewService extends Disposable implements IDimDiagramViewService
 			relPath,
 			focusKind: focus?.kind,
 			focusSymbol: focus?.symbol,
+			startCommand: getHeadlessClaudeStartCommand(this._configurationService),
 		})).finally(() => {
 			this._generating.delete(key);
 			if (this._regenerateAfterRun.delete(key)) {
