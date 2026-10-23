@@ -12,9 +12,10 @@
 - Members: `+methodName(param: Type): ReturnType` and `+fieldName: Type`. Use `+` public, `-` private, `#` protected. Use the members' real identifiers, so each member row can be linked to its code.
 - Order each box's members by visibility: public first, then protected, then private, so a box leads with what the type offers. The viewer also sorts them this way.
 - Relationships: `A <|-- B` (B extends/implements A), `A *-- B` (composition), `A --> B` (association/uses), `A ..> B` (dependency). Label an edge with `A --> B : uses`.
-- Group standalone functions under a single class box named for the module when there is no real class.
+- Draw each standalone function as its own box with the `<<function>>` stereotype and its full signature as its one member (`+name(param: Type) ReturnType`), and each top-level constant as a box with `<<constant>>`. Never group them under an invented box named for the module.
+- A class's injected services are fields of the class whose constructor declares them. When a class passes services on to `super(...)`, they belong on the parent's box, not the child's; draw the parent with an inheritance edge.
 
-**Avoid:** empty or partial boxes. A referenced type you draw as a box lists all its members from the imported definitions; one whose full definition you don't have stays a name on a relationship. When a file has too many types to draw whole in one readable diagram, draw fewer types, not fewer members.
+**Avoid:** empty or partial boxes. A referenced type you draw as a box lists all its members, read from its definition; one whose definition you can't find stays a name on a relationship. When a file has too many types to draw whole in one readable diagram, split them across several Structure diagrams (for example one per class and its collaborators) that together cover every type; never draw fewer types or fewer members.
 
 **Showing changes** (see "Showing changes" in the main skill):
 - A new class or interface is `added` by its name; a deleted one stays drawn, wrapped whole (its `class` block and every relationship line that touches it) in a removed pair.

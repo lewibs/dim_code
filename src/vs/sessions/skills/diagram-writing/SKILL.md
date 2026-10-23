@@ -26,21 +26,26 @@ This table is the single source of truth for which kinds exist. The generator `g
 
 ## Choosing the diagram(s)
 
-- First decide the file's **shape**, then pick the view that fits it. When the file is several functions and interfaces with no single central class, prefer a Structure view of the whole module (its interfaces plus its functions and the "who calls whom" edges) — do not just flowchart one function.
-- Pick only the views that **earn their place**. One is usually right; add a second only when it reveals something the first cannot. Never pad with a diagram that merely restates the overview or lists the file's parts. Every diagram must reveal real structure or behavior from the code. Order them most-useful first.
+- First decide the file's **shape**, then draw every view that fits it. Each kind in the table applies when the code has its entity: a Structure view for the types and functions the file declares, a Sequence view for the routines that call collaborators, a Logic view for the routines whose branching is the point, a States view for each stateful field, a Data view for a schema. When the file is several functions and interfaces with no single central class, its Structure view covers the whole module (its interfaces plus its functions and the "who calls whom" edges) — do not just flowchart one function.
+- A file's diagrams document the file; they are not an answer to a question, so they are never trimmed to what seems interesting. **Every diagram is inclusive of everything its code touches**: every type, function, field, collaborator and call that code declares or uses appears in it. A file always gets at least one diagram, a stylesheet or a one-line function included. Order the views most-useful first.
+- Each view covers the whole file for its kind. When one diagram of a kind would be too large to read, split it into several diagrams of that kind (for example one Sequence per public routine), and together they still cover everything; never drop an element to make one fit.
 
 ## Drawing from the real code
 
 - Base every diagram on what *this* code actually contains, using the real identifiers from it — real class, function, field and participant names, not placeholders.
-- When a type the file references is defined in the imported definitions provided alongside the code, populate it with its real members. Never leave a referenced type as an empty box.
+- Read the whole file before drawing, and read the definition of each type, base class and service it references (following imports as deep as needed), so you can populate each one with its real members. Never leave a referenced type as an empty box.
 - **Draw every element whole.** You choose *which* elements a diagram shows, but each element you draw shows everything about it, never a selection. A reader must be able to trust that what a box doesn't list, the code doesn't have. Each kind's skill says what "whole" means for it:
   - a class, interface or type box lists **every** member: each field and property, constructor parameter properties, every method, getter and setter, static and instance, public, protected and private alike;
-  - a module box lists every function it declares;
+  - a standalone function is its own box (see the Structure skill), with its full signature;
   - a drawn routine (a flowchart, or a sequence of one function's calls) shows every branch, guard, early return, throw, loop and call it makes;
   - a state diagram shows every value the attribute can take and every transition between them;
   - an entity shows every attribute.
-- Keep the diagram readable by drawing **fewer elements**, or by splitting a large element into a view focused on it, never by trimming the elements you draw.
-- An imported type is drawn whole too. Draw it only when its full definition is in front of you: if the definition you were given was cut short, read the rest, or leave the type as a plain referenced name in a relationship rather than drawing a partial box.
+- Keep a diagram readable by splitting it into more diagrams, never by trimming or leaving out the elements you draw.
+- **Draw only what exists.** Every box, participant and member stands for a real symbol in the code, under its real name. Never invent a class, module box or wrapper to hold things that have none (such as a `FooModule` box for a file's top-level functions), and never draw a member a type does not declare.
+- **Put each member on the type that declares it**, including injected services:
+  - A service injected through a class's own constructor (`@IFooService private readonly _foo: IFooService`) is a member of that class.
+  - A member a class inherits stays on the parent's box, with an inheritance edge from the child. A constructor parameter that is only passed on to `super(...)` belongs to the parent, so the child does not list it.
+- An imported type is drawn whole too. Draw it only once you have read its full definition; when you cannot find it (e.g. a library type), leave it as a plain referenced name in a relationship rather than drawing a partial box.
 
 ## Making every element clickable (links)
 
@@ -66,7 +71,7 @@ Every box and every line of text in a Dim diagram is clickable. A click opens th
   - `function`: a function or method;
   - `attribute`: a field, property or class parameter;
   - `file`: a module or file with no single symbol.
-- **`file`** is the workspace-relative path of the file that defines the symbol. Use the main file's path for its own symbols, and the paths given for the imported definitions for theirs. Leave `file` out only when the symbol's file is genuinely unknown (e.g. a library type); the editor then searches the workspace for it.
+- **`file`** is the workspace-relative path of the file that defines the symbol. Use the main file's path for its own symbols, and the path you read each other definition from for theirs. Every `file` must exist. Leave `file` out only when the symbol's file is genuinely unknown (e.g. a library type); the editor then searches the workspace for it.
 - Link every box, member, participant and message that stands for real code. Skip pure prose (a flowchart step like "validate input", a return label like "ok").
 - **`view`** (optional) picks the view the link opens on, in place of the one its kind opens on: `readme`, `classDiagram`, `sequenceDiagram`, `flowchart`, `stateDiagram`, `erDiagram`, or `raw` for the file itself in the text editor. Use it when one view of the target answers what the element is about, e.g. `"view": "sequenceDiagram"` for a participant whose behavior matters more than its structure.
 - **`detail`** is one short sentence on what the element does or holds, in plain words, shown in a card when the pointer rests on the element. Say what the drawing can't: its purpose or effect, not its name or type again. Give one on every link.
@@ -77,7 +82,7 @@ Every box and every line of text in a Dim diagram is clickable. A click opens th
 When the request names a **focus**, document only that one symbol of the file, not the whole file. The readme describes just that symbol.
 
 - **attribute**: draw exactly one `stateDiagram`. Show the values or modes the attribute moves through, and label each transition with the method that moves it (`Idle --> Running : start()`). If its values are open-ended rather than a fixed set of modes, show the lifecycle it does have: unset, set and cleared, and who sets it.
-- **function**: draw the view that explains that one routine. Use a Logic `flowchart` when its branching is the point, a Sequence `sequenceDiagram` when it orchestrates collaborators, or both when both earn their place.
+- **function**: draw the view that explains that one routine. Use a Logic `flowchart` when its branching is the point, a Sequence `sequenceDiagram` when it orchestrates collaborators, or both when both apply.
 - **class**: draw a Structure `classDiagram` of that class and its direct collaborators.
 
 A focused view still links everything it draws.

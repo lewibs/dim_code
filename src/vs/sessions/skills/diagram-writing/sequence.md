@@ -10,6 +10,7 @@
 **Mermaid essentials:**
 - Begin with `sequenceDiagram`.
 - Declare participants you want ordered or aliased: `participant DB as Database`. Name participants after the real class, service or module, so each can be linked to the file it lives in.
+- A participant is always an object, service or module, never a function. A call to a standalone function is a message to the module that declares it (`Action->>claudeStartCommand: getHeadlessClaudeStartCommand(config)`), and a call to the routine's own class is a self-message on that class's lifeline.
 - Calls: `A->>B: request()` (solid, a call); start the message with the real name of the method called, so the message can be linked to it, `B-->>A: result` (dashed, a return). Use `A-)B: event` for async/fire-and-forget.
 - Group with `alt Condition ... else ... end`, `opt Condition ... end`, `loop Each item ... end`.
 

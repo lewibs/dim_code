@@ -7,24 +7,36 @@
 // object the generator asked for and that Mermaid can parse every diagram's source.
 // Run by generateDimDiagram.sh once Claude has answered, so a diagram that would only
 // show "Syntax error" in the viewer is caught (and sent back to Claude to fix) before
-// it is saved.
+// it is saved. It also flags a reply with no diagrams, a diagram with no links, a link to
+// a file that does not exist and a change naming nothing the diagram draws, so Claude is
+// asked to correct them; such a diagram builds, so it is kept either way.
 //
-// Usage: node validateDimDiagrams.js <node_modules dir holding mermaid> < reply.json
+// Usage: node validateDimDiagrams.js <node_modules dir holding mermaid> [workspace folder] < reply.json
+// Links are only checked against the workspace when its folder is given.
 //
 // Exit status, a contract with generateDimDiagram.sh:
 //   0  the reply is valid JSON and every diagram parses
-//   1  some diagrams do not parse; stdout is the reply without them (one line of JSON),
-//      stderr names each one with Mermaid's error
+//   1  some diagrams do not parse, or something is missing or wrong; stdout is the reply without
+//      the diagrams that do not parse (one line of JSON), stderr names each problem
 //   2  could not check (Mermaid could not be loaded); the reply should be kept as it is
 //   3  the reply is not valid JSON; stderr holds the parse error
 
+import { access } from 'fs/promises';
 import { pathToFileURL } from 'url';
+
+/** The part of a link or change in the reply that is checked. */
+interface IReplyElement {
+	readonly label?: unknown;
+	readonly file?: unknown;
+}
 
 /** The part of a diagram in the reply that is checked. */
 interface IReplyDiagram {
 	readonly type?: string;
 	readonly label?: string;
 	readonly mermaid?: string;
+	readonly links?: readonly IReplyElement[];
+	readonly changes?: readonly IReplyElement[];
 }
 
 /** The reply's JSON object; only its diagrams are checked, the rest is passed through. */
@@ -69,8 +81,39 @@ async function loadMermaid(modulesDir: string): Promise<IMermaid> {
 	return (await import(new URL('mermaid/dist/mermaid.core.mjs', modulesUrl).href)).default;
 }
 
+/** Names what is wrong with a diagram that builds: missing links, links to files that do not exist and changes that name nothing drawn. */
+async function checkElements(name: string, diagram: IReplyDiagram, workspace: string | undefined): Promise<string[]> {
+	const errors: string[] = [];
+	const links = Array.isArray(diagram.links) ? diagram.links : [];
+	if (links.length === 0) {
+		errors.push(`${name}: it has no "links". Link every box, member, participant and message it draws to the code it stands for.`);
+	}
+	if (workspace) {
+		const files = new Set(links.map(link => link?.file).filter((file): file is string => typeof file === 'string' && !!file));
+		for (const file of files) {
+			try {
+				await access(file.startsWith('/') ? file : `${workspace}/${file}`);
+			} catch {
+				errors.push(`${name}: a link names the file "${file}", which does not exist. Give the workspace-relative path of the file that defines the symbol.`);
+			}
+		}
+	}
+	// A change is colored by its label: it must be a link's label, or at least name
+	// something the source draws.
+	const labels = new Set(links.map(link => link?.label));
+	for (const change of Array.isArray(diagram.changes) ? diagram.changes : []) {
+		const label = typeof change?.label === 'string' ? change.label : '';
+		const drawn = label.split('.').pop() ?? '';
+		if (!labels.has(label) && !(drawn && diagram.mermaid?.includes(drawn))) {
+			errors.push(`${name}: its "changes" names "${label}", which the diagram does not draw. Name each changed element exactly as the "label" of its link.`);
+		}
+	}
+	return errors;
+}
+
 async function main(): Promise<number> {
 	const reply = await readStdin();
+	const workspace = process.argv[3] || undefined;
 
 	let record: IReply;
 	try {
@@ -94,7 +137,11 @@ async function main(): Promise<number> {
 
 	const valid: IReplyDiagram[] = [];
 	const errors: string[] = [];
-	for (const diagram of Array.isArray(record.diagrams) ? record.diagrams : []) {
+	const diagrams = Array.isArray(record.diagrams) ? record.diagrams : [];
+	if (diagrams.length === 0) {
+		errors.push('The reply has no diagrams. Draw every kind of diagram that applies to the code.');
+	}
+	for (const diagram of diagrams) {
 		const name = `${diagram?.label ?? '?'} (${diagram?.type ?? '?'})`;
 		if (typeof diagram?.mermaid !== 'string' || !diagram.mermaid.trim()) {
 			errors.push(`${name}: it has no "mermaid" source.`);
@@ -103,6 +150,7 @@ async function main(): Promise<number> {
 		try {
 			await mermaid.parse(diagram.mermaid);
 			valid.push(diagram);
+			errors.push(...await checkElements(name, diagram, workspace));
 		} catch (err) {
 			// Mermaid's parse errors span several lines (the position, a caret, what it
 			// expected); keep them whole but bounded.

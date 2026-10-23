@@ -3,20 +3,20 @@
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License. See License.txt in the project root for license information.
 # ---------------------------------------------------------------------------------------------
-# Dim diagram generator. Given one source file, decides which kind of mermaid
-# diagram best fits that code and writes a companion "<file>.dim" record for it.
+# Dim diagram generator. Given one source file, draws the mermaid diagrams of each
+# kind that applies to that code and writes a companion "<file>.dim" record for it.
 #
 # This is the single generation step shared by every Dim trigger: the agent Stop
 # hook (updateDimHook.sh) calls it for each code file changed in a turn, and the
 # editor's file-open path (the `_dim.generateRecord` command) calls it for the
-# file being opened. The kind of diagram is not hard-coded: the code is handed to
-# Claude Haiku, which picks the best-fit diagram type from the Dim catalog and
-# draws it. Keep that catalog in sync with `dimDiagramTypes.ts` / `PLAN.md`.
+# file being opened. The kinds of diagram are not hard-coded: Claude Haiku draws
+# each kind from the Dim catalog (the diagram-writing skill) that applies to the code.
 #
-# The source's direct local imports are resolved to their TypeScript sources and
-# handed to Haiku as extra context, so a type the file references but does not
-# itself declare (e.g. an imported class) is drawn with its real members instead
-# of as an empty box. See the import-gathering step below for its scope and limits.
+# Haiku is not handed the code. It runs in the workspace folder with read-only tools
+# (Read, Grep, Glob) and reads the whole file itself, then follows the types, base
+# classes and services the file uses to their definitions, at any depth, so it can draw
+# them whole and put inherited members on the parent. Only the diff is handed over, as
+# working it out needs git, which Haiku is not given.
 #
 # Arguments:
 #   $1  SRC  - absolute path of the source file to describe.
@@ -37,8 +37,9 @@
 #
 # Regeneration is gated on the source's content hash, which is stamped into the
 # record as `sourceHash`: the record is (re)generated only when it does not exist
-# yet or when the source has changed since it was last generated, so repeated
-# opens of an unchanged file cost nothing.
+# yet, when the source has changed since it was last generated, when the
+# diagram-writing skill has changed (`skillHash`), or when another file the diagrams link
+# to has changed or gone (`linksHash`), so repeated opens of an unchanged file cost nothing.
 #
 # When the file differs from the diff base, the diagrams also mark what changed
 # (see "Showing changes" in the diagram-writing skill), and the record is stamped
@@ -56,7 +57,9 @@
 #
 # While it works, it prints a "DIM_PROGRESS <step>" line on stdout as it starts each
 # step (reading, claude, checking, fixing, saving), which the editor shows as live
-# progress. "fixing" only runs when the check finds a diagram that does not build.
+# progress. "fixing" only runs when the check (validateDimDiagrams.ts) finds something
+# to correct: a diagram that does not build, no diagrams, missing links, a link to a file
+# that does not exist, or a change that names nothing drawn.
 
 SRC="$1"
 OUT="$2"
@@ -104,6 +107,30 @@ hashSource() {
 	fi
 }
 srcHash=$(hashSource "$SRC")
+
+# The workspace folder: SRC with REL taken off its end. Claude runs there, so the
+# workspace-relative paths in its links are the paths it reads. When REL is not the end
+# of SRC, fall back to the file's own folder.
+root="${SRC%"$REL"}"
+[ "$root" != "$SRC" ] && [ -d "$root" ] || root=$(dirname "$SRC")
+
+# Hash of the other files the record on stdin links to, with each one's content, so a
+# record is redrawn when code it draws from another file changes or is deleted. Stamped as
+# `linksHash`.
+hashLinkedFiles() {
+	grep -o '"file"[[:space:]]*:[[:space:]]*"[^"]*"' \
+		| sed 's/.*"\([^"]*\)"$/\1/' \
+		| sort -u \
+		| while IFS= read -r linked; do
+			[ "$linked" = "$REL" ] && continue
+			if [ -f "$root/$linked" ]; then
+				printf '%s %s\n' "$linked" "$(hashSource "$root/$linked")"
+			else
+				printf '%s missing\n' "$linked"
+			fi
+		done \
+		| { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1
+}
 
 # A test file's README also lists its tests (see the TESTS block of the prompt below).
 # Recognized by the common naming conventions for test files and test folders.
@@ -161,6 +188,34 @@ elif git -C "$srcDir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	fi
 fi
 
+# The diagram-writing skill is the single source of truth, read here at runtime. Its
+# SKILL.md holds the general method AND a markdown table of the kinds (keyword + label +
+# per-kind skill file); each kind's detailed drawing instructions live in its own file
+# next to SKILL.md. We inject the general method (with its table) plus the skill for each
+# kind so Haiku follows the right instructions for the view it picks, and we build the
+# allowed-label list from the same table. The DimDiagramType enum in dimDiagramTypes.ts
+# mirrors the table's keywords for TypeScript, guarded by a drift test, so there is
+# nothing to keep in sync by hand. The skill dir sits in a fixed spot relative to the
+# source tree, but the generator is copied into the CLI-terminal plugin's hooks/ folder
+# while the skills are copied into its skills/ folder, so resolve whichever of the two
+# known layouts exists.
+skillsDir=""
+for cand in \
+	"$(dirname "$0")/../skills/diagram-writing" \
+	"$(dirname "$0")/../../../../../sessions/skills/diagram-writing"; do
+	if [ -d "$cand" ]; then
+		skillsDir="$cand"
+		break
+	fi
+done
+
+# A record is drawn by one version of the skill: changing the skill redraws each record
+# the next time it is checked, so old diagrams follow the new rules. Stamped as `skillHash`.
+skillHash=""
+if [ -n "$skillsDir" ]; then
+	skillHash=$(cat "$skillsDir"/*.md 2>/dev/null | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)
+fi
+
 # Already up to date for this exact source content: nothing to do. A test file's record
 # from before the tests table existed has no "tests" field; regenerate it once so it
 # gains one (the generator always writes the field for a test file, even when empty).
@@ -179,7 +234,10 @@ if [ -f "$OUT" ]; then
 	# the changes redraws it.
 	existingPending=$(sed -n 's/.*"pending"[[:space:]]*:[[:space:]]*"\([0-9a-zA-Z]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n1)
 	[ "$wantsDiff" = 1 ] || pendingHash=""
-	if [ -n "$existingHash" ] && [ "$existingHash" = "$srcHash" ] && [ "$hasDiff" = "$wantsDiff" ] && [ "$existingPending" = "$pendingHash" ]; then
+	existingSkillHash=$(sed -n 's/.*"skillHash"[[:space:]]*:[[:space:]]*"\([0-9a-zA-Z]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n1)
+	existingLinksHash=$(sed -n 's/.*"linksHash"[[:space:]]*:[[:space:]]*"\([0-9a-zA-Z]*\)".*/\1/p' "$OUT" 2>/dev/null | head -n1)
+	linksHash=$(hashLinkedFiles < "$OUT")
+	if [ -n "$existingHash" ] && [ "$existingHash" = "$srcHash" ] && [ "$existingSkillHash" = "$skillHash" ] && [ "$existingLinksHash" = "$linksHash" ] && [ "$hasDiff" = "$wantsDiff" ] && [ "$existingPending" = "$pendingHash" ]; then
 		testsMarked=1
 		if [ "$isTestFile" = 1 ] && [ "$diffState" = changed ] && ! tr -d '\n' < "$OUT" 2>/dev/null | grep -q '"diff"[[:space:]]*:[[:space:]]*{[^}]*"tests"[[:space:]]*:[[:space:]]*true'; then
 			testsMarked=0
@@ -219,8 +277,13 @@ if [ -z "$DIM_START_COMMAND" ] && ! command -v claude >/dev/null 2>&1; then
 	[ -f "$OUT" ] || writeEmptyRecord
 	exit 3
 fi
+# Claude runs in the workspace folder with only the read-only tools it reads the code
+# with, and none of the user's MCP servers. Each run may spend at most DIM_DIAGRAM_BUDGET
+# US dollars (default 1); one that would spend more fails, and the file stays as it was.
 runClaude() {
-	sh -c "${DIM_START_COMMAND:-claude} \"\$@\"" claude "$@"
+	(cd "$root" && sh -c "${DIM_START_COMMAND:-claude} \"\$@\"" claude "$@" \
+		--tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config \
+		--max-budget-usd "${DIM_DIAGRAM_BUDGET:-1}")
 }
 
 # Reports the step now starting (see the header); the step names are a contract with
@@ -231,73 +294,6 @@ progress() {
 
 progress reading
 
-# Gather the file's direct local imports so types it references but does not itself
-# declare are not drawn empty. Each workspace-relative specifier (./ or ../) is
-# resolved to its TypeScript source and handed to Haiku as *context* only, to fill
-# in the members of referenced types. Scope and limits, kept deliberately small so
-# the prompt stays bounded and cheap:
-#   - one level deep (the file's own imports, not their imports);
-#   - relative specifiers only, resolved to a sibling .ts (bare/package imports and
-#     side-effect imports without a `from` are ignored);
-#   - each dependency is capped, and the combined context is capped overall.
-# Regeneration is still gated on the main file's hash alone (that is what the editor
-# compares), so editing only an imported file will not refresh this record until the
-# importing file itself changes.
-srcDir=$(dirname "$SRC")
-importSection=""
-importBudget=40000
-imports=$(grep -oE "from[[:space:]]+['\"]\.\.?/[^'\"]+['\"]" "$SRC" 2>/dev/null \
-	| sed -e "s/^from[[:space:]]*['\"]//" -e "s/['\"]\$//" \
-	| sort -u)
-for spec in $imports; do
-	cand="$srcDir/$spec"
-	case "$cand" in
-		*.js) dep="${cand%.js}.ts" ;;
-		*.ts) dep="$cand" ;;
-		*) dep="$cand.ts" ;;
-	esac
-	[ -f "$dep" ] || continue
-	used=$(printf '%s' "$importSection" | wc -c | tr -d ' ')
-	[ "$used" -ge "$importBudget" ] && break
-	piece=$(head -c 8000 "$dep")
-	# Name the dependency by its workspace-relative path, so links to its symbols can
-	# say which file defines them. The workspace root is SRC with REL taken off its end.
-	depAbs="$(cd "$(dirname "$dep")" && pwd)/$(basename "$dep")"
-	depRel="${depAbs#"${SRC%"$REL"}"}"
-	importSection=$(printf '%s\n--- IMPORTED FROM %s (file: %s) ---\n%s\n' "$importSection" "$spec" "$depRel" "$piece")
-done
-
-importBlock=""
-if [ -n "$importSection" ]; then
-	importBlock=$(printf '\nThe following are definitions imported by the file above, provided ONLY as context so you can fill in the members of types the main file references but does not itself declare. Do NOT draw diagrams for them and do NOT center the diagram on them.\n--- BEGIN IMPORTED DEFINITIONS ---%s--- END IMPORTED DEFINITIONS ---\n' "$importSection")
-fi
-
-# Hand the code to Haiku and let it choose the diagram type(s) AND write a short
-# overview of the file. The code is capped so a very large file does not blow up the
-# prompt. The model is told to emit ONLY a JSON object with a "readme" overview and a
-# "diagrams" array, which we wrap into the record below.
-code=$(head -c 60000 "$SRC")
-
-# The diagram-writing skill is the single source of truth, read here at runtime. Its
-# SKILL.md holds the general method AND a markdown table of the kinds (keyword + label +
-# per-kind skill file); each kind's detailed drawing instructions live in its own file
-# next to SKILL.md. We inject the general method (with its table) plus the skill for each
-# kind so Haiku follows the right instructions for the view it picks, and we build the
-# allowed-label list from the same table. The DimDiagramType enum in dimDiagramTypes.ts
-# mirrors the table's keywords for TypeScript, guarded by a drift test, so there is
-# nothing to keep in sync by hand. The skill dir sits in a fixed spot relative to the
-# source tree, but the generator is copied into the CLI-terminal plugin's hooks/ folder
-# while the skills are copied into its skills/ folder, so resolve whichever of the two
-# known layouts exists.
-skillsDir=""
-for cand in \
-	"$(dirname "$0")/../skills/diagram-writing" \
-	"$(dirname "$0")/../../../../../sessions/skills/diagram-writing"; do
-	if [ -d "$cand" ]; then
-		skillsDir="$cand"
-		break
-	fi
-done
 skillFile="$skillsDir/SKILL.md"
 
 # The general diagram-writing method (with the kinds table), from SKILL.md's body —
@@ -309,7 +305,7 @@ fi
 if [ -z "$skillGeneral" ]; then
 	# Degraded fallback when the skill files are missing (e.g. a stale plugin install):
 	# describe the kinds inline so the model can still pick a sensible view.
-	skillGeneral="Choose from these kinds (mermaid keyword = label): classDiagram = Structure, sequenceDiagram = Sequence, flowchart = Logic, stateDiagram = States, erDiagram = Data. Pick only the views that earn their place: one is usually right, a second only when it shows something the first cannot. Do NOT pad with a diagram that merely restates the overview. When the file is standalone functions + interfaces, prefer a Structure view of the whole module (its interfaces + functions with call edges), not a flowchart of one function. Base every diagram on THIS code using its real identifiers, and populate referenced types from the imported definitions instead of leaving empty boxes. Draw every element whole: a box lists ALL its members, a routine shows ALL its branches and calls, a state diagram ALL values and transitions. Keep diagrams readable by drawing fewer elements, never by leaving parts of an element out."
+	skillGeneral="Choose from these kinds (mermaid keyword = label): classDiagram = Structure, sequenceDiagram = Sequence, flowchart = Logic, stateDiagram = States, erDiagram = Data. Draw every kind that applies to the code, each inclusive of everything the code touches: every type, function, field, collaborator and call. Never invent a box for something the code does not declare, and put each member (injected services included) on the type that declares it. When the file is standalone functions + interfaces, prefer a Structure view of the whole module (its interfaces + functions with call edges), not a flowchart of one function. Base every diagram on THIS code using its real identifiers, and read the definitions of the types it references to draw them whole instead of leaving empty boxes. Draw every element whole: a box lists ALL its members, a routine shows ALL its branches and calls, a state diagram ALL values and transitions. Keep diagrams readable by drawing fewer elements, never by leaving parts of an element out."
 fi
 
 # Parse the kinds table in SKILL.md for the allowed-label list and to pull in each kind's
@@ -427,7 +423,7 @@ CHANGES: this file is new since $newSince. The viewer shows the whole diagram as
 esac
 
 prompt=$(cat <<PROMPT_HEADER
-You document source files shown inside an IDE. For the code below, do two things: (1) write a plain-English description of what the file is for and the role/intent of its main class, functions or module, and (2) draw the Mermaid diagram(s) that genuinely help someone understand THIS code.
+You document source files shown inside an IDE. For the file named below, do two things: (1) write a plain-English description of what the file is for and the role/intent of its main class, functions or module, and (2) draw the Mermaid diagrams of THIS code, one for each kind that applies, each inclusive of everything the code touches.
 
 Method (includes the catalog of kinds you may choose from):
 ${skillGeneral}
@@ -439,16 +435,17 @@ Output rules:
 - "type" MUST be exactly the catalog's Mermaid keyword for the kind (e.g. "stateDiagram", even though its source begins "stateDiagram-v2").
 - "label" MUST be exactly one of: ${catalogLabels} (matching the type you chose).
 - "mermaid" MUST be valid Mermaid source beginning with the diagram's keyword.
-- "diagrams" holds only the views that genuinely help (often just one), each a distinct type; never add a type just to have more.
-- Each diagram has a "links" list that maps every box, member, participant and message it draws to the code it stands for, as the skill's links section describes. "file" is the workspace-relative path: "$REL" for this file's own symbols, and the "file:" path shown for each imported definition.
+- "diagrams" holds at least one diagram: every kind that applies to the code, several of one kind when one would be too large to read. Together they cover everything the code declares and touches; never leave an element out.
+- Each diagram has a "links" list that maps every box, member, participant and message it draws to the code it stands for, as the skill's links section describes. "file" is the workspace-relative path: "$REL" for this file's own symbols, and the path you read each other definition from for its symbols.
 - Output ONLY a JSON object, no markdown fences and no prose outside it, shaped EXACTLY like (note the leading "{"):
   {"readme":"..."${testsShape},"diagrams":[{"type":"classDiagram","label":"Structure","mermaid":"classDiagram\n ...","links":[{"label":"Foo","symbol":"Foo","kind":"class","file":"$REL","detail":"One sentence on what Foo does."}]${changesShape}},{"type":"sequenceDiagram","label":"Sequence","mermaid":"sequenceDiagram\n ...","links":[]}]}
 ${focusBlock}${testsBlock}${changesBlock}
-File: $REL
---- BEGIN CODE ---
-$code
---- END CODE ---
-$importBlock
+File: $REL (absolute path: $SRC). The workspace is the current directory.
+
+Before drawing, use your Read, Grep and Glob tools to read the code:
+- Read the WHOLE file, page by page when it is long; never draw from part of it.
+- Find and read the definition of every type, base class, interface and service the file uses (follow its imports, then theirs, as deep as needed), so you can draw each one whole and put inherited members on the parent that declares them.
+- Read only what these diagrams need; do not explore the rest of the workspace.
 PROMPT_HEADER
 )
 
@@ -503,7 +500,7 @@ mermaidDir="${DIM_MERMAID_DIR:-$(dirname "$0")/../../../../../../../extensions/m
 # checkErrors to what failed and checkFiltered to the reply without its broken diagrams.
 checkReply() {
 	checkErrFile="$OUT.check.$$"
-	checkFiltered=$(printf '%s\n' "$1" | "$nodeBin" "$validator" "$mermaidDir" 2>"$checkErrFile")
+	checkFiltered=$(printf '%s\n' "$1" | "$nodeBin" "$validator" "$mermaidDir" "$root" 2>"$checkErrFile")
 	checkStatus=$?
 	checkErrors=$(head -c 4000 "$checkErrFile" 2>/dev/null)
 	rm -f "$checkErrFile"
@@ -515,7 +512,7 @@ if [ -n "$nodeBin" ] && [ -f "$validator" ] && [ -d "$mermaidDir/mermaid" ]; the
 		firstStatus=$checkStatus
 		firstFiltered=$checkFiltered
 		fixedUsed=0
-		echo "generateDimDiagram: reply for $REL does not build; asking Claude to fix it."
+		echo "generateDimDiagram: reply for $REL does not build or is missing parts; asking Claude to fix it."
 		progress fixing
 		fixPrompt=$(cat <<FIX_PROMPT
 ${prompt}
@@ -524,10 +521,10 @@ ${prompt}
 ${result}
 --- END OF YOUR PREVIOUS REPLY ---
 
-Your previous reply above does not build. These are the errors:
+Your previous reply above does not build or is missing parts. These are the errors:
 ${checkErrors}
 
-Output the whole JSON object again, following every rule above, with these errors fixed. Keep everything that was already correct. Output ONLY the JSON object.
+Output the whole JSON object again, following every rule above, with these errors fixed. Keep everything that was already correct. You have read the code already: read again only what a fix needs. Output ONLY the JSON object.
 FIX_PROMPT
 )
 		fixed=$(printf '%s' "$fixPrompt" | runClaude -p --model haiku 2>/dev/null)
@@ -586,8 +583,15 @@ case "$diffState" in
 		;;
 	new) diffField=" \"diff\": {$diffBase, \"new\": true}," ;;
 esac
+skillField=""
+[ -n "$skillHash" ] && skillField=" \"skillHash\": \"$skillHash\","
+# A focused view is stamped with its focus, so the agent hook can regenerate it when the
+# file changes (see updateDimHook.sh). The kind and symbol are plain dotted identifiers.
+focusField=""
+[ -n "$focusBlock" ] && focusField=" \"focus\": {\"kind\": \"$FOCUS_KIND\", \"symbol\": \"$FOCUS_SYMBOL\"},"
+linksField=" \"linksHash\": \"$(printf '%s\n' "$result" | hashLinkedFiles)\","
 tmp="$OUT.tmp.$$"
 printf '%s\n' "$result" \
-	| sed "1 s|{|{\"version\": 1, \"source\": \"$REL\", \"sourceHash\": \"$srcHash\",$diffField$testsField|" \
+	| sed "1 s|{|{\"version\": 1, \"source\": \"$REL\", \"sourceHash\": \"$srcHash\",$skillField$linksField$diffField$focusField$testsField|" \
 	> "$tmp" && mv "$tmp" "$OUT"
 echo "generateDimDiagram: generated diagram and overview for $REL"
